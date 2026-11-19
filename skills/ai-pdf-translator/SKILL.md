@@ -42,7 +42,7 @@ Run `ai-pdf-translator crops W`: it crops the page as printed for every paragrap
 
 ## 6. Build
 
-Run `ai-pdf-translator build W`. It prints the translated PDF, a bilingual PDF, a Markdown copy and the review list with its number of items. Give the user the paths.
+Run `ai-pdf-translator build W`. It prints the translated PDF, a bilingual PDF, three Markdown files (the English, the source text, and both together paragraph by paragraph, with tables as Markdown tables) and the review list with its number of items. Give the user the paths.
 
 ## 7. Review with the user
 
@@ -52,6 +52,10 @@ The review list (W/review.md) holds what a person must verify: paragraphs the sc
 - corrected source text: add `"<id>": {"source": "<text>"}` to W/fixes.json
 
 Then run `ai-pdf-translator apply W`. English fixes rebuild the PDF with no model call. Source fixes create a batch in W/batches/fix-NNN.json: translate it as in step 4, then run `build` again.
+
+## Running again after an update
+
+If the user runs `prepare` again on the same PDF (for example after updating ai-pdf-translator), move the old work folder aside first, then run `ai-pdf-translator reuse W <old work folder>`: unchanged paragraphs keep their English, doubts and scan checks, and `batches` plans only the new text.
 
 ## Without subagents
 

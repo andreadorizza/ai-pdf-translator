@@ -13,7 +13,7 @@ WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven'
          'seventy': 70, 'eighty': 80, 'ninety': 90, 'hundred': 100, 'thousand': 1000}
 MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october',
           'november', 'december']
-GROUP = 6
+GROUP = 12      # items per scan-check file: each subagent has a fixed cost, each crop adds little
 
 
 def load_translations(work):
@@ -68,12 +68,17 @@ def make_scan_checks(work, paragraphs):
     work = Path(work)
     english, checks = load_translations(work)
     todo = to_check(paragraphs, english, checks)
+    (work / 'scancheck').mkdir(exist_ok=True)
+    for f in (work / 'scancheck').glob('*.result.json'):       # checked already: do not check again
+        for pid in json.loads(f.read_text()):
+            todo.pop(pid, None)
     by_id = {p['id']: p for p in paragraphs}
     # Text pages too: a text layer can lack what the page shows (figures drawn without text behind them).
     scan = [i for i in todo if by_id.get(i, {}).get('bbox')]
     (work / 'scancheck').mkdir(exist_ok=True)
     files = []
-    for n, i in enumerate(range(0, len(scan), GROUP), 1):
+    first = 1 + max((int(f.name[:3]) for f in (work / 'scancheck').glob('[0-9][0-9][0-9].json')), default=0)
+    for n, i in enumerate(range(0, len(scan), GROUP), first):
         items = []
         for pid in scan[i:i + GROUP]:
             p = by_id[pid]

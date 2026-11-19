@@ -28,6 +28,13 @@ def merge(work, paragraphs):
     for pid, en in fixed.items():
         if isinstance(en, str):
             english[pid] = en
+    by_text = {}                    # text translated once (a running header) serves every copy of it
+    for p in paragraphs:
+        if p['id'] in english:
+            by_text.setdefault(''.join(p['text'].split()), english[p['id']])
+    for p in paragraphs:
+        if p['id'] not in english and ''.join(p['text'].split()) in by_text:
+            english[p['id']] = by_text[''.join(p['text'].split())]
     return english, checks, checked, unreadable, fixed
 
 
@@ -76,13 +83,58 @@ def build(work, prof, threads=4, review_only=False):
         lines.append('')
     (work / 'review.md').write_text('\n'.join(lines))
 
-    md = []
-    for p in paragraphs:
-        en = english.get(p['id'])
-        if en:
-            m = TITLE.match(en)
-            md.append(f'## {m.group(1)}\n\n{m.group(3)}'.strip() if m and len(m.group(1)) < 140 else en)
-    (work / f'{stem}.en.md').write_text('\n\n'.join(md) + '\n')
+    write_markdown(work, stem, paragraphs, english, prof)
     return {'pdf': str(mono), 'bilingual': str(dual), 'markdown': str(work / f'{stem}.en.md'),
+            'source_markdown': str(work / f'{stem}.{prof.code}.md'),
+            'bilingual_markdown': str(work / f'{stem}.bilingual.md'),
             'review': str(work / 'review.md'), 'review_items': len(review),
             'translated': sum(p['id'] in english for p in paragraphs), 'paragraphs': len(paragraphs)}
+
+
+def _table(rows):
+    """Markdown table from {(row, col): text}."""
+    nrows = max(r for r, _ in rows) + 1
+    ncols = max(c for _, c in rows) + 1
+    cell = lambda r, c: rows.get((r, c), '').replace('|', '\\|').replace('\n', ' ')
+    lines = ['| ' + ' | '.join(cell(0, c) for c in range(ncols)) + ' |', '|' + ' --- |' * ncols]
+    lines += ['| ' + ' | '.join(cell(r, c) for c in range(ncols)) + ' |' for r in range(1, nrows)]
+    return '\n'.join(lines)
+
+
+def _blocks(paragraphs, text_of):
+    """Page by page: paragraphs and labels as text, the cells of each table as one Markdown table."""
+    out, page, tables = [], None, {}
+    for p in paragraphs:
+        if p['page'] != page:
+            page = p['page']
+            out.append(f'*Page {page}*')
+        t = text_of(p)
+        if not t:
+            continue
+        if p.get('role') == 'cell':
+            key = (p['page'], p.get('table'))
+            if key not in tables:
+                tables[key] = {}
+                out.append(tables[key])
+            tables[key][(p['row'], p['col'])] = t
+        else:
+            out.append(t)
+    return '\n\n'.join(_table(b) if isinstance(b, dict) else b for b in out) + '\n'
+
+
+def write_markdown(work, stem, paragraphs, english, prof):
+    """The source text, the English, and both together, in reading order with page marks. No model involved."""
+    work = Path(work)
+    src = lambda p: prof.norm(p['text']).strip()
+    en = lambda p: english.get(p['id'], '').strip()
+    (work / f'{stem}.{prof.code}.md').write_text(_blocks(paragraphs, src))
+    (work / f'{stem}.en.md').write_text(_blocks(paragraphs, en))
+    both = []
+    page = None
+    for p in paragraphs:
+        if p['page'] != page:
+            page = p['page']
+            both.append(f'## Page {page}')
+        role = '' if p.get('role', 'paragraph') == 'paragraph' else f" ({p['role']})"
+        both.append(f"> {src(p)}{role}\n\n{en(p) or '*(not translated)*'}")
+    (work / f'{stem}.bilingual.md').write_text('\n\n'.join(both) + '\n')

@@ -6,6 +6,7 @@ from importlib import resources
 from pathlib import Path
 
 BATCH_CHARS = 12000     # source characters per batch, whole sections only: each subagent has a fixed cost, so fewer is cheaper
+BATCH_ITEMS = 200       # and at most this many items (table cells are short but each needs an answer)
 
 
 def number_paragraphs(records, prof):
@@ -18,7 +19,7 @@ def number_paragraphs(records, prof):
         seen.add((r['page'], ''.join(r['text'].split())))
         n = per_page[r['page']]
         per_page[r['page']] += 1
-        s = prof.section(r['text'])
+        s = prof.section(r['text']) if r.get('role', 'paragraph') == 'paragraph' else None
         if s is not None:
             section = s
         out.append(dict(r, id=f"p{r['page']:03d}_{n:02d}", section=section))
@@ -33,8 +34,9 @@ def batches(paragraphs, prof, limit=BATCH_CHARS):
     """Whole sections per batch; at a numbered heading if a section runs long; anywhere past 1.5x the limit."""
     groups, cur, size = [], [], 0
     for p in paragraphs:
-        new_section = prof.section(p['text']) is not None or SOFT_BREAK.match(p['text'])
-        if cur and ((size > limit and new_section) or size > limit * 1.5):
+        new_section = p.get('role', 'paragraph') == 'paragraph' and (
+            prof.section(p['text']) is not None or SOFT_BREAK.match(p['text']))
+        if cur and ((size > limit and new_section) or size > limit * 1.5 or len(cur) >= BATCH_ITEMS):
             groups.append(cur)
             cur, size = [], 0
         cur.append(p)
@@ -104,26 +106,45 @@ def write_files(work, paragraphs, prof, batch_chars=BATCH_CHARS):
     return write_batches(work, paragraphs, prof, batch_chars), cands
 
 
+def text_key(text, prof):
+    return ''.join(prof.norm(text).split())
+
+
 def write_batches(work, paragraphs, prof, batch_chars=BATCH_CHARS):
     """One self-contained file per batch: the instructions, the terms that occur in it, and its paragraphs.
-    A subagent reads this one file and writes one. Batches already translated are left alone."""
+    A subagent reads this one file and writes one. Paragraphs that already have English are left out, and text
+    that repeats (a running header, a label used twice) is translated once."""
+    from .check import load_translations
     work = Path(work)
     t = work / 'terms' / 'terms.json'
     terms = json.loads(t.read_text()) if t.exists() else {}
     instructions = (work / 'TRANSLATOR.md').read_text()
-    groups = batches(paragraphs, prof, batch_chars)
-    for old in (work / 'batches').glob('[0-9][0-9][0-9].json'):
-        if not (work / 'translations' / old.name).exists():
-            old.unlink()
-    for i, g in enumerate(groups, 1):
-        name = f'{i:03d}'
-        if (work / 'translations' / f'{name}.json').exists():
+    done, _ = load_translations(work)
+    seen = {text_key(p['text'], prof) for p in paragraphs if p['id'] in done}
+    todo = []
+    for p in paragraphs:
+        k = text_key(p['text'], prof)
+        if p['id'] in done or k in seen:
             continue
-        text = ''.join(''.join(prof.norm(p['text']).split()) for p in g)
+        seen.add(k)
+        todo.append(p)
+    translated = {f.stem for f in (work / 'translations').glob('[0-9][0-9][0-9].json')}
+    for old in (work / 'batches').glob('[0-9][0-9][0-9].json'):
+        if old.stem not in translated:
+            old.unlink()
+    start = max((int(s) for s in translated), default=0)
+    groups = batches(todo, prof, batch_chars) if todo else []
+    for i, g in enumerate(groups, start + 1):
+        name = f'{i:03d}'
+        text = ''.join(text_key(p['text'], prof) for p in g)
         used = {k: v for k, v in terms.items() if ''.join(prof.norm(k).split()) in text}
+        items = []
+        for p in g:
+            item = {'id': p['id'], 'page': p['page'], 'text': prof.norm(p['text'])}
+            if p.get('role', 'paragraph') != 'paragraph':
+                item['role'] = p['role']
+            items.append(dict(item, **hints(p)))
         b = {'batch': name, 'output': f'translations/{name}.json', 'instructions': instructions,
-             'terms': used if terms else 'no term list yet',
-             'paragraphs': [dict({'id': p['id'], 'page': p['page'], 'text': prof.norm(p['text'])}, **hints(p))
-                            for p in g]}
+             'terms': used if terms else 'no term list yet', 'paragraphs': items}
         (work / 'batches' / f'{name}.json').write_text(json.dumps(b, ensure_ascii=False, indent=1))
     return groups

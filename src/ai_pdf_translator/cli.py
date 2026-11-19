@@ -3,6 +3,7 @@
   setup          check Tesseract, its models and the layout model; say how to install what is missing
   prepare PDF    sort pages, read scans twice, find paragraphs and doubts, write term candidates and batches
   batches WORK   after the term list: rewrite each batch with the terms it uses
+  reuse WORK OLD after a re-run of prepare: take the English, doubts and scan checks of unchanged paragraphs from OLD
   status WORK    what is done and what is left
   crops WORK     after translation: crops of the scan for the paragraphs in doubt, in scan-check files
   build WORK     merge everything; write the translated PDF, a bilingual PDF, Markdown and the review list
@@ -93,6 +94,39 @@ def rebatch(work):
     print(f'{len(groups)} batches in {work / "batches"}' + ('' if has_terms else ' (no term list yet)'))
 
 
+def reuse(work, old):
+    """Copy what an earlier work folder has for paragraphs whose source text is unchanged, so only new text is
+    translated. The term list comes too, if the new folder has none."""
+    from . import langs
+    from .build import merge
+    from .check import load_translations
+    from .plan import text_key
+    work, old = Path(work), Path(old)
+    prof = langs.load(json.loads((work / 'job.json').read_text())['lang'])
+    old_paras = json.loads((old / 'paragraphs.json').read_text())
+    english, checks, checked, _, _ = merge(old, old_paras)
+    by_text = {}
+    for p in old_paras:
+        if p['id'] in english:
+            by_text.setdefault(text_key(p['text'], prof), p['id'])
+    new_paras = json.loads((work / 'paragraphs.json').read_text())
+    done, _ = load_translations(work)
+    mapping = {p['id']: by_text[text_key(p['text'], prof)] for p in new_paras
+               if p['id'] not in done and text_key(p['text'], prof) in by_text}
+    out = {'batch': '000', 'reused_from': str(old),
+           'translations': {n: english[o] for n, o in mapping.items()},
+           'check': [{'id': n, 'source': '', 'why': w} for n, o in mapping.items() for w in checks.get(o, [])]}
+    (work / 'translations' / '000.json').write_text(json.dumps(out, ensure_ascii=False, indent=1))
+    results = {n: checked[o] for n, o in mapping.items() if o in checked}
+    if results:
+        (work / 'scancheck').mkdir(exist_ok=True)
+        (work / 'scancheck' / '000.result.json').write_text(json.dumps(results, ensure_ascii=False, indent=1))
+    if not (work / 'terms' / 'terms.json').exists() and (old / 'terms' / 'terms.json').exists():
+        shutil.copy(old / 'terms' / 'terms.json', work / 'terms' / 'terms.json')
+    print(f'Reused {len(mapping)} of {len(new_paras)} paragraphs ({len(results)} with a scan check) from {old}. '
+          f'Next: "ai-pdf-translator batches {work}".')
+
+
 def status(work):
     work = Path(work)
     batches = sorted((work / 'batches').glob('*.json'))
@@ -129,7 +163,8 @@ def build(work, threads=4, review_only=False):
     job['minutes'] = round((time.time() - job['started']) / 60, 1)
     _write_job(work, job)
     print(f"Translated {r['translated']}/{r['paragraphs']} paragraphs\n"
-          f"PDF: {r['pdf']}\nBilingual PDF: {r['bilingual']}\nMarkdown: {r['markdown']}\n"
+          f"PDF: {r['pdf']}\nBilingual PDF: {r['bilingual']}\n"
+          f"Markdown: {r['markdown']} (English), {r['source_markdown']} (source), {r['bilingual_markdown']} (both)\n"
           f"Review list: {r['review']} ({r['review_items']} items)")
     return r
 
@@ -254,6 +289,9 @@ def main(argv=None):
     p = sub.add_parser('build')
     p.add_argument('work')
     p.add_argument('--review-only', action='store_true', help='rewrite the review list only, without the PDF')
+    p = sub.add_parser('reuse')
+    p.add_argument('work')
+    p.add_argument('old')
     p = sub.add_parser('translate')
     p.add_argument('work')
     p.add_argument('--service', required=True, choices=['anthropic', 'openai'])
@@ -287,6 +325,8 @@ def main(argv=None):
         build(a.work, review_only=a.review_only)
     elif a.cmd == 'apply':
         apply(a.work)
+    elif a.cmd == 'reuse':
+        reuse(a.work, a.old)
     elif a.cmd == 'translate':
         translate(a.work, a.service, a.model, a.check_model, a.base_url)
     elif a.cmd == 'self-test':

@@ -17,7 +17,7 @@ from html import escape
 from pathlib import Path
 
 import pymupdf
-from pymupdf import Rect
+from pymupdf import Point, Rect
 
 import pdf2zh.converter as conv
 import pdf2zh.high_level as hl
@@ -114,16 +114,131 @@ class _PageWithFigures:
 
 def _ocr_page(page, detection, translator, font, thread, cancellation_event=None):
     pno = page.number + 1
-    source = page if pno in STATE['scan_pages'] else _PageWithFigures(page, STATE['profile'])
+    is_scan = pno in STATE['scan_pages']
+    source = page if is_scan else _PageWithFigures(page, STATE['profile'])
     paras = zocr.ocr_paragraphs(source, detection)
-    if not paras:
-        return
+    extras = _labels(page, source, paras, is_scan)
     if STATE['mode'] == 'record':
+        kind = 'scan' if is_scan else 'text'
         for bounds, text, size, _ in paras:
-            STATE['records'].append({'page': pno, 'kind': 'scan' if pno in STATE['scan_pages'] else 'text', 'text': text,
+            STATE['records'].append({'page': pno, 'kind': kind, 'role': 'paragraph', 'text': text,
                                      'bbox': [round(v, 1) for v in bounds], 'size': round(size, 2)})
+        for x in extras:
+            rec = {'page': pno, 'kind': kind, 'role': x['role'], 'text': x['text'],
+                   'bbox': [round(v, 1) for v in x['bbox']], 'size': round(x['size'], 2)}
+            rec.update({k: x[k] for k in ('table', 'row', 'col') if k in x})
+            STATE['records'].append(rec)
         return
-    _write_scan_page(page, detection, paras)
+    _write_page(page, detection, paras, extras)
+
+
+# ---------- text outside paragraphs: table cells, labels in figures, running headers, covers ----------
+
+def _spans(page):
+    out = []
+    for b in page.get_text('dict')['blocks']:
+        for l in b.get('lines', []):
+            for s in l['spans']:
+                if s['text'].strip():
+                    out.append((Rect(s['bbox']), s['size'], s['color']))
+    return out
+
+
+def _lines(words):
+    """Words grouped into lines (top to bottom), each line left to right."""
+    lines = []
+    for w in sorted(words, key=lambda w: (w[1] + w[3]) / 2):
+        h = max(w[3] - w[1], 1)
+        if lines and abs((w[1] + w[3]) / 2 - lines[-1][0]) < 0.5 * h:
+            lines[-1][1].append(w)
+        else:
+            lines.append([(w[1] + w[3]) / 2, [w]])
+    return [sorted(l, key=lambda w: w[0]) for _, l in lines]
+
+
+def _join(words):
+    return ' '.join(' '.join(w[4] for w in line) for line in _lines(words))
+
+
+def _bbox(words):
+    r = Rect(words[0][:4])
+    for w in words[1:]:
+        r |= Rect(w[:4])
+    return r
+
+
+def _labels(page, source, paras, is_scan):
+    """Text the paragraph finder leaves out: cells of ruled tables (digital pages), then clusters of the remaining
+    words, such as labels in figures, running headers and footers, and cover titles. Only text in the source script."""
+    prof = STATE['profile']
+    rot = page.rotation_matrix
+    used = {tuple(round(v, 1) for v in r) for *_, rects in paras for r in rects}
+    words = []
+    for w in source.get_text('words'):
+        r = Rect(w[:4]) * rot
+        if w[4].strip() and tuple(round(v, 1) for v in r) not in used:
+            words.append((r.x0, r.y0, r.x1, r.y1, w[4]))
+    if not words:
+        return []
+    spans = [] if is_scan else _spans(page)
+    page_mid = (page.rect.x0 + page.rect.x1) / 2
+    items = []
+
+    def add(ws, role, frame=None, **meta):
+        text = _join(ws)
+        if prof is None or prof.count(text) < 2:
+            return
+        box = _bbox(ws)
+        near = [(s, c) for r, s, c in spans if (r & box).get_area() > 0]
+        size = sorted(s for s, _ in near)[len(near) // 2] if near else 0.72 * sorted(w[3] - w[1] for w in ws)[len(ws) // 2]
+        colors = [c for _, c in near]
+        color = max(set(colors), key=colors.count) if colors else 0
+        frame = frame or box
+        centred = abs((box.x0 + box.x1) / 2 - (frame.x0 + frame.x1) / 2) < 0.12 * frame.width if role == 'cell' \
+            else abs((box.x0 + box.x1) / 2 - page_mid) < 0.05 * page.rect.width
+        items.append(dict(meta, role=role, text=text, bbox=box, frame=frame, size=size, color=color,
+                          align='center' if centred else 'left', words=[Rect(w[:4]) for w in ws]))
+
+    if not is_scan:
+        try:
+            tables = page.find_tables().tables
+        except Exception:          # table detection is a bonus; a page it cannot read keeps its tables as they are
+            tables = []
+        for ti, tab in enumerate(tables):
+            for ri, row in enumerate(tab.rows):
+                for ci, cell in enumerate(row.cells):
+                    if cell is None:
+                        continue
+                    cr = Rect(cell)
+                    inside = [w for w in words if Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2) in cr]
+                    if inside:
+                        words = [w for w in words if w not in inside]
+                        add(inside, 'cell', frame=cr + (1.5, 1.5, -1.5, -1.5), table=ti, row=ri, col=ci)
+
+    chunks = []                     # each line split where the gap between words is wide
+    for line in _lines(words):
+        cur = [line[0]]
+        for w in line[1:]:
+            h = max(w[3] - w[1], 1)
+            if w[0] - cur[-1][2] > 1.0 * h:
+                chunks.append(cur)
+                cur = []
+            cur.append(w)
+        chunks.append(cur)
+    clusters = []                   # stack chunks that sit in one column with a line's gap between them
+    for ch in sorted(chunks, key=lambda c: _bbox(c).y0):
+        b = _bbox(ch)
+        for cl in clusters:
+            a = _bbox(cl)
+            overlap = min(a.x1, b.x1) - max(a.x0, b.x0)
+            if 0 <= b.y0 - a.y1 < 0.6 * a.height / max(1, len(_lines(cl))) + 2 and overlap > 0.5 * min(a.width, b.width):
+                cl.extend(ch)
+                break
+        else:
+            clusters.append(list(ch))
+    for cl in clusters:
+        add(cl, 'label')
+    return items
 
 
 def patch():
@@ -147,9 +262,10 @@ def _scan_word_boxes(pno, page):
     return [Rect(*(v * s for v in w['box'])) * page.derotation_matrix for w in tesseract_words(tsv)]
 
 
-def _write_scan_page(page, detection, paras):
+def _write_page(page, detection, paras, extras):
     pno = page.number + 1
     prof = STATE['profile']
+    is_scan = pno in STATE['scan_pages']
     items = []
     for bounds, text, size, words in paras:
         en = STATE['lookup'].get((pno, key(text)))
@@ -157,37 +273,43 @@ def _write_scan_page(page, detection, paras):
             STATE['missing'].append((pno, text))
             continue
         items.append([Rect(bounds), en, size, words, text])
-    if not items:
+    labels = []
+    for x in extras:
+        en = STATE['lookup'].get((pno, key(x['text'])))
+        if en is None:
+            STATE['missing'].append((pno, x['text']))
+        else:
+            labels.append(dict(x, english=en))
+    if not items and not labels:
         return
-    # The text layer gives short lines (headings, list items) a small size: no paragraph goes below body text.
-    long_sizes = sorted(it[2] for it in items if len(it[4]) > 60) or sorted(it[2] for it in items)
-    body = long_sizes[len(long_sizes) // 2]
-    for it in items:
-        it[2] = min(max(it[2], body), 12)
-    titles = [Rect(*b.xyxy) for b in detection.boxes if detection.names[int(b.cls)] == 'title']
-    wide = [b for b, *_ in items if b.width > page.rect.width * 0.4]
-    left = min((b.x0 for b in wide), default=min(b.x0 for b, *_ in items))
-    right = max((b.x1 for b in wide), default=max(b.x1 for b, *_ in items))
     scan_boxes = _scan_word_boxes(pno, page)
     pad = 0.3 if prof and prof.get('stacked_marks') else 0.1
-    for it in items:      # the scan's word boxes are taller than the text layer's: use them for the box height
-        inside = [r for r in scan_boxes if (r.tl + r.br) / 2 in it[0]]
-        for r in inside:
-            it[0] |= Rect(it[0].x0, r.y0 - pad * r.height, it[0].x1, r.y1 + pad * r.height)
-    source_areas = [(Rect(b), en, s, w, src) for b, en, s, w, src in items]
+    if items:
+        # The text layer gives short lines (headings, list items) a small size: no paragraph goes below body text.
+        long_sizes = sorted(it[2] for it in items if len(it[4]) > 60) or sorted(it[2] for it in items)
+        body = long_sizes[len(long_sizes) // 2]
+        for it in items:
+            it[2] = min(max(it[2], body), 12)
+        wide = [b for b, *_ in items if b.width > page.rect.width * 0.4]
+        left = min((b.x0 for b in wide), default=min(b.x0 for b, *_ in items))
+        right = max((b.x1 for b in wide), default=max(b.x1 for b, *_ in items))
+        for it in items:      # the scan's word boxes are taller than the text layer's: use them for the box height
+            inside = [r for r in scan_boxes if (r.tl + r.br) / 2 in it[0]]
+            for r in inside:
+                it[0] |= Rect(it[0].x0, r.y0 - pad * r.height, it[0].x1, r.y1 + pad * r.height)
+    titles = [Rect(*b.xyxy) for b in detection.boxes if detection.names[int(b.cls)] == 'title']
+    source_areas = [(Rect(b), s, w) for b, en, s, w, src in items] + [(x['bbox'], x['size'], x['words']) for x in labels]
     ordered = sorted(items, key=lambda it: it[0].y0)
     with pymupdf.open() as overlay:
         target = overlay.new_page(width=page.rect.width, height=page.rect.height)
-        for bounds, _, _, words, _ in items:      # cover first, then write, so no box hides English
-            if pno not in STATE['scan_pages']:
-                continue                          # vector text is removed instead of covered
-            for r in words:
-                target.draw_rect(r + (-0.5, -0.5, 0.5, 0.5), color=None, fill=(1, 1, 1))
-            for r in scan_boxes:
-                c = (r.tl + r.br) / 2
-                if c in bounds:
-                    target.draw_rect(Rect(r.x0 - 1, r.y0 - pad * r.height, r.x1 + 1, r.y1 + pad * r.height),
-                                     color=None, fill=(1, 1, 1))
+        if is_scan:             # cover first, then write, so no box hides English
+            for bounds, _, words in source_areas:
+                for r in words:
+                    target.draw_rect(r + (-0.5, -0.5, 0.5, 0.5), color=None, fill=(1, 1, 1))
+                for r in scan_boxes:
+                    if (r.tl + r.br) / 2 in bounds:
+                        target.draw_rect(Rect(r.x0 - 1, r.y0 - pad * r.height, r.x1 + 1, r.y1 + pad * r.height),
+                                         color=None, fill=(1, 1, 1))
         for i, (bounds, en, size, _, _) in enumerate(ordered):
             centered = (any((t & bounds).get_area() > bounds.get_area() / 2 for t in titles)
                         or (abs((bounds.x0 + bounds.x1) / 2 - (left + right) / 2) < 20 and bounds.width < 0.7 * (right - left)))
@@ -206,11 +328,19 @@ def _write_scan_page(page, detection, paras):
             css = (f'* {{font-family: serif; font-size: {size:.1f}pt; line-height: 1.2; margin: 0; padding: 0}}'
                    f' p {{text-align: {"center" if centered else "left"}}}')
             target.insert_htmlbox(box, f'<p>{body}</p>', css=css, scale_low=0)
+        for x in labels:        # cells, figure labels, headers: in their own frame, size and colour
+            box = Rect(x['frame'])
+            if x['role'] != 'cell':
+                box = Rect(box.x0 - 2, box.y0, box.x1 + 2, max(box.y1, box.y0 + x['size'] * 1.3))
+            color = '#000000' if is_scan else f"#{x['color']:06x}"
+            css = (f"* {{font-family: serif; font-size: {x['size']:.1f}pt; line-height: 1.1; margin: 0; padding: 0;"
+                   f" color: {color}}} p {{text-align: {x['align']}}}")
+            target.insert_htmlbox(box, f"<p>{escape(x['english'])}</p>", css=css, scale_low=0)
         links = page.get_links()
-        if pno in STATE['scan_pages']:
+        if is_scan:
             page.add_redact_annot(page.rect * page.derotation_matrix, fill=False)   # our invisible text layer
-        else:       # a text page: remove the text in each translated paragraph only; tables, labels, headers stay
-            for bounds, _, size, words, _ in source_areas:
+        else:       # a text page: remove the translated text only; untranslated text and drawings stay
+            for bounds, size, words in source_areas:
                 area = Rect(bounds)
                 for r in words:
                     area |= r

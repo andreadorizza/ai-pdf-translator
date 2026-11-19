@@ -8,6 +8,14 @@ Turns PDFs in low-resource languages, often scanned, into English set in the ori
 The PDF a user wants translated.
 _Avoid_: input file, original
 
+**Cell**:
+One cell of a ruled table on a digital page, translated and written back inside the cell.
+_Avoid_: table paragraph
+
+**Label**:
+Text outside the paragraphs and tables: in a figure, on a cover, or a running header or footer. Translated briefly and written back in its own place, size and colour.
+_Avoid_: caption (a caption is a paragraph), annotation
+
 **Page kind**:
 How a page's text can be obtained: a *text page* has a usable text layer, a *scan page* has only an image or a broken font, a *target page* is already in the target language and is skipped, and a *blank page* has nothing to translate.
 _Avoid_: page type, digital page
