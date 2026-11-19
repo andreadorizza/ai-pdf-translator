@@ -87,8 +87,12 @@ def _merged_words(page, prof):
                         run += c['c']
                         box = Rect(c['bbox']) if box is None else box | Rect(c['bbox'])
                     elif run:
-                        near = min(words, key=lambda w: abs((w[1] + w[3]) / 2 - (box.y0 + box.y1) / 2), default=None)
-                        extra.append((*box, run, near[5] if near else -1, near[6] if near else -1, -1))
+                        same_line = [w for w in words if w[1] < box.y1 and w[3] > box.y0]
+                        dup = any(run in w[4] and abs(w[0] - box.x0) < 40 for w in same_line)
+                        if not dup:     # some PDFs draw a figure twice, once inside the ActualText word
+                            near = min(same_line or words, key=lambda w: abs((w[1] + w[3]) / 2 - (box.y0 + box.y1) / 2),
+                                       default=None)
+                            extra.append((*box, run, near[5] if near else -1, near[6] if near else -1, -1))
                         run, box = '', None
     return words + extra
 

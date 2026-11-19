@@ -14,7 +14,7 @@ def test_numbers_found_as_digits_words_and_months():
 
 
 def test_lao_digits_and_missing_figure():
-    assert number_problems('ມາດຕາ ໒໕ ແລະ 3.000 ໂຕນ', 'Article 25 and 300 tonnes', LO) == ['3000']
+    assert number_problems('ມາດຕາ ໒໕ ແລະ 3.000 ໂຕນ', 'Article 25 and 300 tonnes', LO) == ['3.000']
 
 
 def test_list_number_at_start_is_ignored():
@@ -41,3 +41,15 @@ def test_batches_end_at_sections_only():
 
 def test_figures_inside_latin_words_are_skipped():
     assert number_problems('ກາກບອນໄດອອກໄຊ (C0), (N20) ແລະ 25 ໂຕນ', 'carbon dioxide (CO2), (N2O) and 25 tonnes', LO) == []
+
+
+def test_ordinals_roman_sections_and_split_figures():
+    assert number_problems('ສະບັບທີ 1 ພາກທີ 2', 'the first edition, Part II', LO) == []
+    assert number_problems('2.1 ອຸທົກທໍລະນີ', '2.1 Hydrogeology', LO) == []
+    assert number_problems('ລະຫວ່າງ 3 0- -45 ແມັດ', 'between 30 and 45 metres', LO) == []
+    assert number_problems('1.000 ໂຕນ', '1,000 tonnes', LO) == []
+
+
+def test_figures_the_pdf_prints_twice():
+    assert number_problems('ກວມເອົາ 16 16, 2% 2% ແລະ 20302030', 'accounted for 16.2% and 2030', LO) == []
+    assert number_problems('ປີ 2020', 'in 2020', LO) == []

@@ -31,15 +31,15 @@ def merge(work, paragraphs):
     return english, checks, checked, unreadable, fixed
 
 
-def build(work, prof, threads=4):
+def build(work, prof, threads=4, review_only=False):
     work = Path(work)
     job, paragraphs = load_job(work)
     english, checks, checked, unreadable, fixed = merge(work, paragraphs)
     lookup = {(p['page'], key(p['text'])): english[p['id']] for p in paragraphs if p['id'] in english}
     stem = Path(job['source']).stem
     mono, dual = work / f'{stem}.en.pdf', work / f'{stem}.bilingual.pdf'
-    missing_in_layout = layout.render(job['searchable'], job['pages'], job['scan_pages'], prof, work, lookup,
-                                      mono, dual, threads)
+    missing_in_layout = [] if review_only else layout.render(job['searchable'], job['pages'], job['scan_pages'], prof,
+                                                             work, lookup, mono, dual, threads)
 
     review = []
     for p in paragraphs:
@@ -56,6 +56,11 @@ def build(work, prof, threads=4):
             review.append((p, 'Figures in the source missing from the English', ', '.join(nums)))
         if pid in checks and pid not in checked:
             review.append((p, 'The translator was unsure and no scan check was done', '; '.join(checks[pid])))
+        elif pid in checks and not checked[pid].get('changed') and pid not in unreadable:
+            review.append((p, 'The translator was unsure; the scan check found the page prints it this way',
+                           '; '.join(checks[pid] + [checked[pid].get('note') or '']).strip('; ')))
+        elif checked.get(pid, {}).get('note') and pid not in unreadable:
+            review.append((p, 'Note from the scan check', checked[pid]['note']))
     for page, text in missing_in_layout:
         review.append(({'id': '?', 'page': page, 'text': text}, 'Found in the layout but not in the paragraph list', ''))
 

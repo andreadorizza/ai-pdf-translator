@@ -7,7 +7,7 @@ For each item, open the crop image, read the {language} in the image carefully (
 Write the file named in the check file's `output` field, and nothing else, as JSON:
 
 ```json
-{"p009_03": {"source_read": "the {language} you read for the doubtful part", "english": "the full corrected English for the paragraph", "changed": true, "unreadable": false}}
+{"p009_03": {"source_read": "the {language} you read for the doubtful part", "english": "the full corrected English for the paragraph", "changed": true, "unreadable": false, "note": ""}}
 ```
 
-Set `unreadable` to true when the scan itself is too unclear to decide; a person will check those paragraphs.
+Set `unreadable` to true when the scan itself is too unclear to decide; a person will check those paragraphs. Use `note` for anything else a person should verify, such as a word you read with little confidence or an error in the source itself (a figure that does not add up, a number printed twice); leave it empty otherwise.

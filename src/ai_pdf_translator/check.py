@@ -91,21 +91,55 @@ def _runs(text):
     return [r.lstrip('0') or '0' for r in re.findall(r'\d+', text)]
 
 
-def number_problems(source, english, prof):
-    """Figures in the source that the English does not contain, as digits or (for small numbers) words."""
-    src = prof.ascii_digits(source)
-    en = english.lower().replace(',', '')
+ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh',
+            'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth',
+            'twentieth']
+ROMAN = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100}
+
+
+def _roman(s):
+    total = 0
+    for a, b in zip(s, s[1:] + ' '):
+        v = ROMAN[a]
+        total += -v if b != ' ' and ROMAN.get(b, 0) > v else v
+    return total
+
+
+def _english_numbers(english):
+    """Every number the English states: digits, number words, ordinals, Roman numerals, months."""
+    en = english.replace(',', '')
+    low = en.lower()
     have = set(_runs(en))
-    words = {str(v) for w, v in WORDS.items() if re.search(rf'\b{w}\b', en)}
-    months = {str(i + 1) for i, m in enumerate(MONTHS) if m in en}
+    have |= {str(v) for w, v in WORDS.items() if re.search(rf'\b{w}\b', low)}
+    have |= {str(i + 1) for i, w in enumerate(ORDINALS) if re.search(rf'\b{w}\b', low)}
+    have |= {str(_roman(r)) for r in re.findall(r'\b([IVXLC]{1,6})\b', en)}
+    return have, {str(i + 1) for i, m in enumerate(MONTHS) if m in low}
+
+
+def number_problems(source, english, prof):
+    """Figures in the source that the English does not contain, as digits, words, ordinals or Roman numerals."""
+    src = re.sub(r'(?<=\d) (?=\d)', '', prof.ascii_digits(source))     # "3 0" from split glyph runs is 30
+    have, months = _english_numbers(english)
     missing = []
     # Figures inside Latin words (CO2, N2O, tCO2e) are names, often misread by OCR: skip them.
     for tok in re.findall(r'(?<![A-Za-z\d])(?:\d[\d.,/:-]*\d|\d)(?![A-Za-z\d])', src):
         if re.fullmatch(r'\d{1,2}[.)]?', tok) and tok == src.strip()[:len(tok)]:
             continue                       # a list number at the start
         date = re.fullmatch(r'(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})', tok)
-        for j, run in enumerate(_runs(tok.replace(',', '').replace('.', '') if not date else tok)):
-            if run in have or run in words or (date and j == 1 and run in months):
-                continue
-            missing.append(run)
+        if date:
+            parts = _runs(tok)
+            if any(r not in have and not (j == 1 and r in months) for j, r in enumerate(parts)):
+                missing.append(tok)
+            continue
+        parts = _runs(tok)
+        merged = _runs(tok.replace(',', '').replace('.', ''))   # "1.000" or "1,000" may be written 1000
+        if all(_stated(r, have) for r in parts) or all(_stated(r, have) for r in merged):
+            continue
+        missing.append(tok)
     return missing
+
+
+def _stated(run, have):
+    """A figure is stated if the English has it; a figure printed twice by the PDF ("1616") counts once."""
+    half = len(run) // 2
+    return run in have or (len(run) % 2 == 0 and half and run[:half] == run[half:] and run[:half] in have)

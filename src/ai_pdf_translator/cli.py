@@ -117,12 +117,15 @@ def crops(work):
     return files
 
 
-def build(work, threads=4):
+def build(work, threads=4, review_only=False):
     from . import langs
     from .build import build as _build
     work = Path(work)
     job = json.loads((work / 'job.json').read_text())
-    r = _build(work, langs.load(job['lang']), threads)
+    r = _build(work, langs.load(job['lang']), threads, review_only)
+    if review_only:
+        print(f"Review list: {r['review']} ({r['review_items']} items)")
+        return r
     job['minutes'] = round((time.time() - job['started']) / 60, 1)
     _write_job(work, job)
     print(f"Translated {r['translated']}/{r['paragraphs']} paragraphs\n"
@@ -245,8 +248,11 @@ def main(argv=None):
     p.add_argument('--work', help='work folder (default: next to the PDF, <name>.translation)')
     p.add_argument('--psm', type=int, default=4, help='Tesseract page segmentation mode')
     p.add_argument('--batch-chars', type=int, help='source characters per batch (default 12000)')
-    for name in ('batches', 'status', 'crops', 'build', 'apply'):
+    for name in ('batches', 'status', 'crops', 'apply'):
         sub.add_parser(name).add_argument('work')
+    p = sub.add_parser('build')
+    p.add_argument('work')
+    p.add_argument('--review-only', action='store_true', help='rewrite the review list only, without the PDF')
     p = sub.add_parser('translate')
     p.add_argument('work')
     p.add_argument('--service', required=True, choices=['anthropic', 'openai'])
@@ -277,7 +283,7 @@ def main(argv=None):
     elif a.cmd == 'crops':
         crops(a.work)
     elif a.cmd == 'build':
-        build(a.work)
+        build(a.work, review_only=a.review_only)
     elif a.cmd == 'apply':
         apply(a.work)
     elif a.cmd == 'translate':
