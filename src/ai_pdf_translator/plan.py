@@ -146,5 +146,9 @@ def write_batches(work, paragraphs, prof, batch_chars=BATCH_CHARS):
             items.append(dict(item, **hints(p)))
         b = {'batch': name, 'output': f'translations/{name}.json', 'instructions': instructions,
              'terms': used if terms else 'no term list yet', 'paragraphs': items}
+        pages = sorted({p['page'] for p in g if p.get('role') == 'picture'})
+        if pages:       # the pictures themselves, so the translator can read what OCR misread
+            b['pictures'] = {str(n): [str(f.relative_to(work)) for f in sorted((work / 'ocr').glob(f'p{n:03d}.pic*.png'))]
+                             for n in pages}
         (work / 'batches' / f'{name}.json').write_text(json.dumps(b, ensure_ascii=False, indent=1))
     return groups

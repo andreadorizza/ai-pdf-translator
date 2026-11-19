@@ -30,7 +30,7 @@ Start one subagent per file in W/batches/ (names `001.json`, `002.json`, …), s
 
 > Translate W/batches/NNN.json: follow the instructions inside it. Write only the file named in its "output" field (relative to W). Reply with one line: paragraphs translated and items in "check".
 
-Each batch file holds everything the subagent needs, so it reads one file and writes one. Do not split batches smaller: every subagent has a fixed cost.
+Each batch file holds everything the subagent needs, so it reads one file and writes one. Do not split batches smaller: every subagent has a fixed cost. A batch file with a `pictures` field holds text read from pictures (map legends, charts): give it a subagent whose model reads images (in Claude Code: `model: sonnet`), so it can read the pictures and fix the OCR.
 
 Then run `ai-pdf-translator status W`. Start a subagent again for any batch it lists as left.
 
