@@ -82,6 +82,13 @@ def build(work, prof, threads=4, review_only=False):
     for page, text in missing_in_layout:
         review.append(({'id': '?', 'page': page, 'text': text}, 'Found in the layout but not in the paragraph list', ''))
 
+    seen, unique = set(), []         # the same problem in repeated text (a cell on several pages) is listed once
+    for p, why, detail in review:
+        k = (why, ''.join(p['text'].split()), detail)
+        if k not in seen:
+            seen.add(k)
+            unique.append((p, why, detail))
+    review = unique
     lines = [f'# Review list: {Path(job["source"]).name}', '',
              f'{len(review)} items. Check each against the source; to correct one, add its id and the full corrected '
              'English to `fixes.json` in this folder ({"p009_03": "English"}) and run `ai-pdf-translator apply '
