@@ -60,4 +60,4 @@ If subagents are not available, or the user prefers an API key, run the whole tr
 
 ## Self-test
 
-To check a model or service on Lao before a real job, the user needs the Lao carbon-credit decree (2025) that has an English version on pages 29–56. Run `ai-pdf-translator self-test <decree.pdf>`, do steps 3 to 6 on the work folder it prints, then `ai-pdf-translator self-test --score W`. It prints four lines: pass or fail, the score against the human English, figures matched, and time.
+To check a model or service on Lao before a real job, run `ai-pdf-translator self-test`: it downloads the Lao carbon-credit decree (2025), published by GGGI with an English version on pages 29–56, and prepares pages 5–8. Do steps 3 to 6 on the work folder it prints, then `ai-pdf-translator self-test --score W`. It prints four lines: pass or fail, the score against the human English, figures matched, and time.

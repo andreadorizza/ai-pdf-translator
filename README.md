@@ -60,7 +60,7 @@ Without an agent, with an API key: `ai-pdf-translator translate report.translati
 
 ## Self-test
 
-`ai-pdf-translator self-test <decree.pdf>` translates pages of the Lao carbon-credit decree (2025), which has a human English version. It prints whether your agent or service passes on Lao: chrF++, figures matched, and time.
+`ai-pdf-translator self-test` downloads the Lao carbon-credit decree (2025) from [GGGI](https://gggi.org/wp-content/uploads/2026/01/Decree-on-Carbon-Credits_PM-Signed_Lao-and-Eng-1.pdf), which has a human English version, and translates pages 5–8. It prints whether your agent or service passes on Lao: chrF++, figures matched, and time.
 
 ## Status
 

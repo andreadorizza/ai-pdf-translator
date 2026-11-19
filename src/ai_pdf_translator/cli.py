@@ -226,6 +226,7 @@ def self_test(pdf=None, full=False, work=None, service=None, model=None, check_m
     if score_only:
         print('\n'.join(selftest.score(score_only)))
         return
+    pdf = pdf or selftest.download()
     selftest.check_source(pdf)
     work = prepare(pdf, 'lo', selftest.FULL if full else selftest.SAMPLE,
                    work or Path(pdf).resolve().with_name('self-test.translation'))
@@ -260,7 +261,7 @@ def main(argv=None):
     p.add_argument('--check-model', help='model for the scan check (must read images); default: --model')
     p.add_argument('--base-url')
     p = sub.add_parser('self-test')
-    p.add_argument('pdf', nargs='?')
+    p.add_argument('pdf', nargs='?', help='the decree PDF (default: download it from GGGI)')
     p.add_argument('--full', action='store_true')
     p.add_argument('--work')
     p.add_argument('--score', metavar='WORK')
@@ -289,8 +290,6 @@ def main(argv=None):
     elif a.cmd == 'translate':
         translate(a.work, a.service, a.model, a.check_model, a.base_url)
     elif a.cmd == 'self-test':
-        if not a.score and not a.pdf:
-            ap.error('self-test needs the decree PDF, or --score WORK')
         self_test(a.pdf, a.full, a.work, a.service, a.model, a.check_model, a.base_url, a.score)
     elif a.cmd == 'install-skill':
         install_skill(a.agent, a.where)

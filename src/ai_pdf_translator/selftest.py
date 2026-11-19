@@ -13,6 +13,7 @@ from pathlib import Path
 import pymupdf
 
 SHA256 = '57d665ffac0d9bd499e605d16777d98076a77d66da73b53717fe2905cc3ab529'
+URL = 'https://gggi.org/wp-content/uploads/2026/01/Decree-on-Carbon-Credits_PM-Signed_Lao-and-Eng-1.pdf'   # published by GGGI
 SAMPLE, FULL = '5-8', '5-24'
 REFERENCE_PAGES = (29, 56)
 PASS_CHRF, PASS_NUMBERS = 60.0, 0.95
@@ -20,6 +21,20 @@ NUM_WORDS = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'se
              'ten': 10, 'eleven': 11, 'twelve': 12, 'fifteen': 15, 'twenty': 20, 'thirty': 30, 'forty': 40,
              'fifty': 50, 'sixty': 60, 'ninety': 90, 'hundred': 100}
 HEAD = re.compile(r'(?:^|\n)\s*Articles?\s+(\d{1,3})\b')
+
+
+def download():
+    """The decree, downloaded once into the user's cache and checked against the known hash."""
+    import requests
+    path = Path.home() / '.cache' / 'ai-pdf-translator' / 'decree-on-carbon-credits-lao-eng.pdf'
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        print(f'Downloading the self-test document from {URL}', flush=True)
+        r = requests.get(URL, timeout=120, headers={'User-Agent': 'ai-pdf-translator'})
+        r.raise_for_status()
+        path.write_bytes(r.content)
+    check_source(path)
+    return path
 
 
 def check_source(pdf):
