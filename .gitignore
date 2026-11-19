@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.translation/
+*.egg-info/
+dist/

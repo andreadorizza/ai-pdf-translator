@@ -1,0 +1,11 @@
+{
+  "name": "ai-pdf-translator",
+  "owner": {"name": "Andrea Dorizza"},
+  "plugins": [
+    {
+      "name": "ai-pdf-translator",
+      "source": "./",
+      "description": "Translate scanned or digital PDFs in Lao and other low-resource languages into English, in the original layout."
+    }
+  ]
+}

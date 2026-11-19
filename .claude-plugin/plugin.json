@@ -1,0 +1,7 @@
+{
+  "name": "ai-pdf-translator",
+  "version": "0.1.0",
+  "description": "Translate scanned or digital PDFs in Lao and other low-resource languages into English, in the original layout, with checked OCR, subagent translation and a review list.",
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["pdf", "translation", "ocr", "lao", "scanned-pdf"]
+}
