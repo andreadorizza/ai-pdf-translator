@@ -33,6 +33,8 @@ def to_check(paragraphs, english, checks):
         if p['kind'] == 'scan' and p['id'] in english and any(
                 f['type'] in ('junk_characters', 'numbers') for f in p.get('doubts', [])):
             out.setdefault(p['id'], []).append('automatic: the OCR shows numbers or junk characters here')
+        elif p.get('role') == 'picture' and p['id'] in english and p.get('doubts'):
+            out.setdefault(p['id'], []).append('automatic: text read by OCR from a picture, with doubts')
     return out
 
 

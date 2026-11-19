@@ -78,6 +78,8 @@ def find(paragraph, prof, work):
         junk = sum(1 for c in text if not (prof.in_script(c) or c.isalnum() or c.isspace() or c in '.,;:()/-–"\'%'))
         if junk >= 3:
             found.append({'type': 'junk_characters', 'count': junk})
+    if paragraph.get('role') == 'picture' and paragraph.get('conf', 100) < 75:
+        found.append({'type': 'low_confidence', 'words': [text]})
     nw = non_words(text.replace(' ', ''), prof)
     if nw:
         found.append({'type': 'not_in_dictionary', 'spans': nw})

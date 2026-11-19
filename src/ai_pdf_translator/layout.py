@@ -124,9 +124,11 @@ def _ocr_page(page, detection, translator, font, thread, cancellation_event=None
             STATE['records'].append({'page': pno, 'kind': kind, 'role': 'paragraph', 'text': text,
                                      'bbox': [round(v, 1) for v in bounds], 'size': round(size, 2)})
         for x in extras:
+            if x['role'] == 'cover':
+                continue
             rec = {'page': pno, 'kind': kind, 'role': x['role'], 'text': x['text'],
                    'bbox': [round(v, 1) for v in x['bbox']], 'size': round(x['size'], 2)}
-            rec.update({k: x[k] for k in ('table', 'row', 'col', 'copy') if k in x})
+            rec.update({k: x[k] for k in ('table', 'row', 'col', 'copy', 'conf') if k in x})
             STATE['records'].append(rec)
         return
     _write_page(page, detection, paras, extras)
@@ -165,6 +167,42 @@ def _bbox(words):
     for w in words[1:]:
         r |= Rect(w[:4])
     return r
+
+
+def _picture_words(pno):
+    import json
+    f = Path(STATE['work']) / 'ocr' / f'p{pno:03d}.pictures.json'
+    if not f.exists():
+        return []
+    return [tuple(w) for w in json.loads(f.read_text()) if str(w[4]).strip() and w[5] >= 20]
+
+
+def _clusters(words, stack=True):
+    """Words split into chunks at wide gaps on a line, then (with stack) chunks stacked in one column joined."""
+    chunks = []
+    for line in _lines(words):
+        cur = [line[0]]
+        for w in line[1:]:
+            h = max(w[3] - w[1], 1)
+            if w[0] - cur[-1][2] > 1.0 * h:
+                chunks.append(cur)
+                cur = []
+            cur.append(w)
+        chunks.append(cur)
+    if not stack:
+        return chunks
+    clusters = []
+    for ch in sorted(chunks, key=lambda c: _bbox(c).y0):
+        b = _bbox(ch)
+        for cl in clusters:
+            a = _bbox(cl)
+            overlap = min(a.x1, b.x1) - max(a.x0, b.x0)
+            if 0 <= b.y0 - a.y1 < 0.6 * a.height / max(1, len(_lines(cl))) + 2 and overlap > 0.5 * min(a.width, b.width):
+                cl.extend(ch)
+                break
+        else:
+            clusters.append(list(ch))
+    return clusters
 
 
 def _labels(page, source, paras, is_scan):
@@ -218,30 +256,41 @@ def _labels(page, source, paras, is_scan):
                         words = [w for w in words if w not in inside]
                         add(inside, 'cell', frame=cr + (1.5, 1.5, -1.5, -1.5), table=ti, row=ri, col=ci)
 
-    chunks = []                     # each line split where the gap between words is wide
-    for line in _lines(words):
-        cur = [line[0]]
-        for w in line[1:]:
-            h = max(w[3] - w[1], 1)
-            if w[0] - cur[-1][2] > 1.0 * h:
-                chunks.append(cur)
-                cur = []
-            cur.append(w)
-        chunks.append(cur)
-    clusters = []                   # stack chunks that sit in one column with a line's gap between them
-    for ch in sorted(chunks, key=lambda c: _bbox(c).y0):
-        b = _bbox(ch)
-        for cl in clusters:
-            a = _bbox(cl)
-            overlap = min(a.x1, b.x1) - max(a.x0, b.x0)
-            if 0 <= b.y0 - a.y1 < 0.6 * a.height / max(1, len(_lines(cl))) + 2 and overlap > 0.5 * min(a.width, b.width):
-                cl.extend(ch)
-                break
-        else:
-            clusters.append(list(ch))
-    for cl in clusters:
+    for cl in _clusters(words):
         add(cl, 'label')
+
+    # Text inside pictures (digital pages): read by OCR in prepare, covered in the picture's own colour, and
+    # replaced by the English. Text lying under text we translate anyway (a cover title's shadow) is left alone.
+    pics = [] if is_scan else _picture_words(page.number + 1)
+    if pics:
+        taken = [Rect(b) for b, *_ in paras] + [x['bbox'] for x in items]
+        for cl in _clusters(pics, stack=False):      # a legend or chart label is one line
+            box = _bbox(cl)
+            text = _join(cl)
+            letters = sum(c.isalpha() for c in text)
+            if prof is None or prof.count(text) < 3 or prof.count(text) < 0.5 * letters:
+                continue                            # texture or noise read as letters
+            if any((box & t).get_area() > 0.3 * box.get_area() for t in taken):
+                continue                            # under text we translate anyway (a cover title's shadow)
+            n = len(items)
+            add(cl, 'picture')
+            if len(items) > n:
+                items[-1]['conf'] = round(sum(w[5] for w in cl) / len(cl), 1)
     return items
+
+
+def _background(page, box):
+    """The most common colour just around a box, as (r, g, b) from 0 to 1."""
+    import collections
+    clip = (Rect(box) + (-3, -3, 3, 3)) & page.rect
+    pix = page.get_pixmap(dpi=72, clip=clip, alpha=False)
+    w, h, n = pix.width, pix.height, pix.n
+    border = [(x, y) for x in range(w) for y in (0, h - 1)] + [(x, y) for y in range(h) for x in (0, w - 1)]
+    s = pix.samples
+    colours = collections.Counter(tuple(s[(y * w + x) * n + i] // 8 * 8 for i in range(3)) for x, y in border)
+    if not colours:
+        return (1, 1, 1)
+    return tuple(c / 255 for c in colours.most_common(1)[0][0])
 
 
 def patch():
@@ -276,9 +325,12 @@ def _write_page(page, detection, paras, extras):
             STATE['missing'].append((pno, text))
             continue
         items.append([Rect(bounds), en, size, words, text])
-    labels = []
+    labels, covers = [], []
     for x in extras:
         if x.get('copy'):
+            continue
+        if x['role'] == 'cover':
+            covers.append(x)
             continue
         en = STATE['lookup'].get((pno, key(x['text'])))
         if en is None:
@@ -287,6 +339,9 @@ def _write_page(page, detection, paras, extras):
             labels.append(dict(x, english=en))
     if not items and not labels:
         return
+    pictures = [x for x in labels if x['role'] == 'picture']
+    for x in pictures + covers:        # the picture's own colour around the text, read before anything changes
+        x['background'] = _background(page, x['bbox'])
     scan_boxes = _scan_word_boxes(pno, page)
     pad = 0.3 if prof and prof.get('stacked_marks') else 0.1
     if items:
@@ -303,7 +358,8 @@ def _write_page(page, detection, paras, extras):
             for r in inside:
                 it[0] |= Rect(it[0].x0, r.y0 - pad * r.height, it[0].x1, r.y1 + pad * r.height)
     titles = [Rect(*b.xyxy) for b in detection.boxes if detection.names[int(b.cls)] == 'title']
-    source_areas = [(Rect(b), s, w) for b, en, s, w, src in items] + [(x['bbox'], x['size'], x['words']) for x in labels]
+    source_areas = [(Rect(b), s, w) for b, en, s, w, src in items] + [
+        (x['bbox'], x['size'], x['words']) for x in labels if x['role'] != 'picture']
     ordered = sorted(items, key=lambda it: it[0].y0)
     with pymupdf.open() as overlay:
         target = overlay.new_page(width=page.rect.width, height=page.rect.height)
@@ -315,6 +371,8 @@ def _write_page(page, detection, paras, extras):
                     if (r.tl + r.br) / 2 in bounds:
                         target.draw_rect(Rect(r.x0 - 1, r.y0 - pad * r.height, r.x1 + 1, r.y1 + pad * r.height),
                                          color=None, fill=(1, 1, 1))
+        for x in pictures + covers:      # text in a picture: cover it in the picture's colour
+            target.draw_rect(Rect(x['bbox']) + (-1.5, -1, 1.5, 1), color=None, fill=x['background'])
         for i, (bounds, en, size, _, _) in enumerate(ordered):
             centered = (any((t & bounds).get_area() > bounds.get_area() / 2 for t in titles)
                         or (abs((bounds.x0 + bounds.x1) / 2 - (left + right) / 2) < 20 and bounds.width < 0.7 * (right - left)))
@@ -337,7 +395,11 @@ def _write_page(page, detection, paras, extras):
             box = Rect(x['frame'])
             if x['role'] != 'cell':
                 box = Rect(box.x0 - 2, box.y0, box.x1 + 2, max(box.y1, box.y0 + x['size'] * 1.3))
-            color = '#000000' if is_scan else f"#{x['color']:06x}"
+            if x['role'] == 'picture':
+                light = sum(c * w for c, w in zip(x['background'], (0.299, 0.587, 0.114))) > 0.5
+                color = '#000000' if light else '#ffffff'
+            else:
+                color = '#000000' if is_scan else f"#{x['color']:06x}"
             css = (f"* {{font-family: serif; font-size: {x['size']:.1f}pt; line-height: 1.1; margin: 0; padding: 0;"
                    f" color: {color}}} p {{text-align: {x['align']}}}")
             target.insert_htmlbox(box, f"<p>{escape(x['english'])}</p>", css=css, scale_low=0)

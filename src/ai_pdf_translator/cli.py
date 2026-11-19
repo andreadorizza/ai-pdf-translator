@@ -59,6 +59,10 @@ def prepare(pdf, lang='lo', pages=None, work=None, psm=4, threads=4, batch_chars
     todo = [p for p in pages if kinds[p - 1] in ('text', 'scan')]
     if not todo:
         raise SystemExit('No page to translate: every page is blank or already in English.')
+    text_pages = [p for p in todo if kinds[p - 1] == 'text']
+    n = ocr.read_pictures(src, text_pages, prof, work, workers=threads)
+    if n:
+        print(f'Read the text inside {n} pictures on text pages', flush=True)
     searchable = work / 'source.searchable.pdf'
     ocr.searchable_pdf(src, scan, work, searchable)
     print('Finding paragraphs (PDFMathTranslate layout model)', flush=True)
