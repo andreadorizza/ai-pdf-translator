@@ -25,11 +25,16 @@ def number_paragraphs(records, prof):
     return out
 
 
+# Numbered headings and chapter words: good places to end a batch in documents without "Article N".
+SOFT_BREAK = re.compile(r'^\s*(\d+(\.\d+)*\.?\s+\S|ບົດທີ|ພາກທີ|ໝວດທີ|Chapter|Part)')
+
+
 def batches(paragraphs, prof, limit=BATCH_CHARS):
+    """Whole sections per batch; at a numbered heading if a section runs long; anywhere past 1.5x the limit."""
     groups, cur, size = [], [], 0
     for p in paragraphs:
-        new_section = prof.section(p['text']) is not None
-        if cur and size > limit and new_section:
+        new_section = prof.section(p['text']) is not None or SOFT_BREAK.match(p['text'])
+        if cur and ((size > limit and new_section) or size > limit * 1.5):
             groups.append(cur)
             cur, size = [], 0
         cur.append(p)

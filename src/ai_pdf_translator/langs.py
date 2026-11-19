@@ -30,6 +30,7 @@ PROFILES = {
         'definitions_heading': r'ອະທິບາຍຄ[ຳໍ]າ?ສັບ',
         # Tone marks and vowels stack above and below the line, outside the word boxes OCR reports.
         'stacked_marks': True,
+        'combining_marks': '\u0eb1\u0eb4-\u0ebc\u0ec8-\u0ecd',
     },
 }
 
@@ -57,6 +58,9 @@ class Profile(dict):
 
     def norm(self, text):
         text = unicodedata.normalize('NFC', text)
+        marks = self.get('combining_marks')
+        if marks:       # PDFs from word processors often put a space before a vowel or tone mark
+            text = re.sub(f' +(?=[{marks}])', '', text)
         for a, b in self.get('normalize', []):
             text = text.replace(a, b)
         return text

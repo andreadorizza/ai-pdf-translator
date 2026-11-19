@@ -1,6 +1,8 @@
 """Layout and write-back through PDFMathTranslate (pdf2zh), pinned to one commit, with runtime patches:
 
-1. Scan pages are the pages we put a text layer on; pdf2zh does no OCR of its own.
+1. Every page we translate goes through pdf2zh's OCR-page path, which reads words with PyMuPDF; pdf2zh does no OCR
+   of its own. Its text-page path counts combining marks (Lao, Thai, Khmer vowels and tones) as formula characters
+   and replaces them with placeholders, so we do not use it.
 2. Translations come from our files: a translator class records each paragraph (pass 1) or returns
    the English we have for it (pass 2). It takes the place of the "google" service and makes no network calls.
 3. Scan pages are written by our code: white boxes cover the scan's own word boxes (with room for stacked
@@ -24,7 +26,7 @@ from pdf2zh.translator import BaseTranslator
 
 from .ocr import DPI, tesseract_words
 
-STATE = {'mode': 'record', 'scan_pages': set(), 'records': [], 'lookup': {}, 'page': None,
+STATE = {'mode': 'record', 'scan_pages': set(), 'pages': set(), 'records': [], 'lookup': {}, 'page': None,
          'profile': None, 'work': None, 'missing': []}
 _MODEL = None
 
@@ -53,7 +55,7 @@ class AgentTranslator(BaseTranslator):
 
 
 def _scan_pages(doc, pages, lang_in, cancellation_event):
-    return {p - 1 for p in STATE['scan_pages'] if not pages or (p - 1) in pages}
+    return {p - 1 for p in STATE['pages'] if not pages or (p - 1) in pages}
 
 
 _receive_layout = conv.TranslateConverter.receive_layout
@@ -71,7 +73,7 @@ def _ocr_page(page, detection, translator, font, thread, cancellation_event=None
         return
     if STATE['mode'] == 'record':
         for bounds, text, size, _ in paras:
-            STATE['records'].append({'page': pno, 'kind': 'scan', 'text': text,
+            STATE['records'].append({'page': pno, 'kind': 'scan' if pno in STATE['scan_pages'] else 'text', 'text': text,
                                      'bbox': [round(v, 1) for v in bounds], 'size': round(size, 2)})
         return
     _write_scan_page(page, detection, paras)
@@ -125,10 +127,13 @@ def _write_scan_page(page, detection, paras):
         inside = [r for r in scan_boxes if (r.tl + r.br) / 2 in it[0]]
         for r in inside:
             it[0] |= Rect(it[0].x0, r.y0 - pad * r.height, it[0].x1, r.y1 + pad * r.height)
+    source_areas = [(Rect(b), en, s, w, src) for b, en, s, w, src in items]
     ordered = sorted(items, key=lambda it: it[0].y0)
     with pymupdf.open() as overlay:
         target = overlay.new_page(width=page.rect.width, height=page.rect.height)
         for bounds, _, _, words, _ in items:      # cover first, then write, so no box hides English
+            if pno not in STATE['scan_pages']:
+                continue                          # vector text is removed instead of covered
             for r in words:
                 target.draw_rect(r + (-0.5, -0.5, 0.5, 0.5), color=None, fill=(1, 1, 1))
             for r in scan_boxes:
@@ -140,7 +145,9 @@ def _write_scan_page(page, detection, paras):
             centered = (any((t & bounds).get_area() > bounds.get_area() / 2 for t in titles)
                         or (abs((bounds.x0 + bounds.x1) / 2 - (left + right) / 2) < 20 and bounds.width < 0.7 * (right - left)))
             box = Rect(bounds)
-            if not centered:
+            if centered:            # a centered caption or title may use the whole column, still centered
+                box.x0, box.x1 = min(box.x0, left), max(box.x1, right)
+            else:
                 box.x1 = max(box.x1, right)
             below = [o[0].y0 for o in ordered[i + 1:] if o[0].y0 > bounds.y0 + 2 and o[0].x0 < box.x1 and o[0].x1 > box.x0]
             limit = min(below) - 1 if below else min(page.rect.y1 - 40, bounds.y1 + 3 * size)
@@ -153,8 +160,18 @@ def _write_scan_page(page, detection, paras):
                    f' p {{text-align: {"center" if centered else "left"}}}')
             target.insert_htmlbox(box, f'<p>{body}</p>', css=css, scale_low=0)
         links = page.get_links()
-        page.add_redact_annot(page.rect * page.derotation_matrix, fill=False)
-        page.apply_redactions(images=0, graphics=0, text=0)       # remove our invisible text layer
+        if pno in STATE['scan_pages']:
+            page.add_redact_annot(page.rect * page.derotation_matrix, fill=False)   # our invisible text layer
+        else:       # a text page: remove the text in each translated paragraph only; tables, labels, headers stay
+            for bounds, _, size, words, _ in source_areas:
+                area = Rect(bounds)
+                for r in words:
+                    area |= r
+                # Glyph boxes in Lao fonts are tall, and any glyph touching the area is removed: shrink the area
+                # vertically so the lines above and below (a running header, the next paragraph) are not touched.
+                area = Rect(area.x0 - 1, area.y0 + 0.25 * size, area.x1 + 2, area.y1 - 0.25 * size)
+                page.add_redact_annot(area * page.derotation_matrix, fill=False)
+        page.apply_redactions(images=0, graphics=0, text=0)
         for link in links:
             page.insert_link(link)
         page.show_pdf_page(page.rect * page.derotation_matrix, overlay, 0, rotate=page.rotation)
@@ -165,7 +182,8 @@ def _write_scan_page(page, detection, paras):
 def _model():
     global _MODEL
     if _MODEL is None:
-        from pdf2zh.doclayout import OnnxModel
+        from pdf2zh.doclayout import OnnxModel, set_backend
+        set_backend('cpu')      # Apple's CoreML backend fails on pages of a different size; the CPU handles any page
         _MODEL = OnnxModel.load_available()
     return _MODEL
 
@@ -184,7 +202,7 @@ def _translate(pdf, pages, lang_in, outdir, threads):
 def record(pdf, pages, scan_pages, prof, work, threads=4):
     """Pass 1: the paragraphs pdf2zh finds, in reading order, with page and box (scan pages)."""
     patch()
-    STATE.update(mode='record', records=[], scan_pages=set(scan_pages), profile=prof, work=str(work))
+    STATE.update(mode='record', records=[], scan_pages=set(scan_pages), pages=set(pages), profile=prof, work=str(work))
     with tempfile.TemporaryDirectory() as tmp:
         _translate(pdf, pages, prof.code, tmp, threads)
     return list(STATE['records'])
@@ -193,7 +211,8 @@ def record(pdf, pages, scan_pages, prof, work, threads=4):
 def render(pdf, pages, scan_pages, prof, work, lookup, out_mono, out_dual, threads=4):
     """Pass 2: write the English we have for each paragraph. Returns paragraphs that had no English."""
     patch()
-    STATE.update(mode='render', lookup=lookup, missing=[], scan_pages=set(scan_pages), profile=prof, work=str(work))
+    STATE.update(mode='render', lookup=lookup, missing=[], scan_pages=set(scan_pages), pages=set(pages), profile=prof,
+                 work=str(work))
     with tempfile.TemporaryDirectory() as tmp:
         _translate(pdf, pages, prof.code, tmp, threads)
         stem = Path(pdf).stem
