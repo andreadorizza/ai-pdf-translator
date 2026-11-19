@@ -1,5 +1,6 @@
 """Build: merge translations, scan checks and fixes; write the translated PDF, a Markdown copy and the review list."""
 import json
+import re
 from pathlib import Path
 
 from . import layout
@@ -7,12 +8,17 @@ from .check import load_translations, number_problems
 from .layout import TITLE, key
 
 
+# A scan-check note on a corrected item usually explains the correction; keep those that express doubt.
+DOUBT = re.compile(r'unclear|uncertain|not sure|low confidence|moderate confidence|could be|may be|might|verify|check|'
+                   r'illegible|hard to read|guess', re.I)
+
+
 def load_job(work):
     work = Path(work)
     return json.loads((work / 'job.json').read_text()), json.loads((work / 'paragraphs.json').read_text())
 
 
-def merge(work, paragraphs):
+def merge(work, paragraphs, prof=None):
     work = Path(work)
     english, checks = load_translations(work)
     checked, unreadable = {}, {}
@@ -28,20 +34,24 @@ def merge(work, paragraphs):
     for pid, en in fixed.items():
         if isinstance(en, str):
             english[pid] = en
+    for p in paragraphs:            # cells of figures are kept as they are
+        if p.get('copy') and p['id'] not in english:
+            english[p['id']] = p['text']
+    norm = (lambda s: ''.join(prof.norm(s).split())) if prof else (lambda s: ''.join(s.split()))
     by_text = {}                    # text translated once (a running header) serves every copy of it
     for p in paragraphs:
         if p['id'] in english:
-            by_text.setdefault(''.join(p['text'].split()), english[p['id']])
+            by_text.setdefault(norm(p['text']), english[p['id']])
     for p in paragraphs:
-        if p['id'] not in english and ''.join(p['text'].split()) in by_text:
-            english[p['id']] = by_text[''.join(p['text'].split())]
+        if p['id'] not in english and norm(p['text']) in by_text:
+            english[p['id']] = by_text[norm(p['text'])]
     return english, checks, checked, unreadable, fixed
 
 
 def build(work, prof, threads=4, review_only=False):
     work = Path(work)
     job, paragraphs = load_job(work)
-    english, checks, checked, unreadable, fixed = merge(work, paragraphs)
+    english, checks, checked, unreadable, fixed = merge(work, paragraphs, prof)
     lookup = {(p['page'], key(p['text'])): english[p['id']] for p in paragraphs if p['id'] in english}
     stem = Path(job['source']).stem
     mono, dual = work / f'{stem}.en.pdf', work / f'{stem}.bilingual.pdf'
@@ -66,7 +76,8 @@ def build(work, prof, threads=4, review_only=False):
         elif pid in checks and not checked[pid].get('changed') and pid not in unreadable:
             review.append((p, 'The translator was unsure; the scan check found the page prints it this way',
                            '; '.join(checks[pid] + [checked[pid].get('note') or '']).strip('; ')))
-        elif checked.get(pid, {}).get('note') and pid not in unreadable:
+        elif checked.get(pid, {}).get('note') and pid not in unreadable and (
+                not checked[pid].get('changed') or DOUBT.search(checked[pid]['note'])):
             review.append((p, 'Note from the scan check', checked[pid]['note']))
     for page, text in missing_in_layout:
         review.append(({'id': '?', 'page': page, 'text': text}, 'Found in the layout but not in the paragraph list', ''))

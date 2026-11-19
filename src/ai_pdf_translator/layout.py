@@ -126,7 +126,7 @@ def _ocr_page(page, detection, translator, font, thread, cancellation_event=None
         for x in extras:
             rec = {'page': pno, 'kind': kind, 'role': x['role'], 'text': x['text'],
                    'bbox': [round(v, 1) for v in x['bbox']], 'size': round(x['size'], 2)}
-            rec.update({k: x[k] for k in ('table', 'row', 'col') if k in x})
+            rec.update({k: x[k] for k in ('table', 'row', 'col', 'copy') if k in x})
             STATE['records'].append(rec)
         return
     _write_page(page, detection, paras, extras)
@@ -186,8 +186,11 @@ def _labels(page, source, paras, is_scan):
 
     def add(ws, role, frame=None, **meta):
         text = _join(ws)
-        if prof is None or prof.count(text) < 2:
+        copy = prof is None or prof.count(text) < 2
+        if copy and role != 'cell':
             return
+        if copy:                    # a cell of figures: kept as it is, recorded so the Markdown table is whole
+            meta['copy'] = True
         box = _bbox(ws)
         near = [(s, c) for r, s, c in spans if (r & box).get_area() > 0]
         size = sorted(s for s, _ in near)[len(near) // 2] if near else 0.72 * sorted(w[3] - w[1] for w in ws)[len(ws) // 2]
@@ -275,6 +278,8 @@ def _write_page(page, detection, paras, extras):
         items.append([Rect(bounds), en, size, words, text])
     labels = []
     for x in extras:
+        if x.get('copy'):
+            continue
         en = STATE['lookup'].get((pno, key(x['text'])))
         if en is None:
             STATE['missing'].append((pno, x['text']))

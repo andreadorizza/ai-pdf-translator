@@ -124,7 +124,7 @@ def write_batches(work, paragraphs, prof, batch_chars=BATCH_CHARS):
     todo = []
     for p in paragraphs:
         k = text_key(p['text'], prof)
-        if p['id'] in done or k in seen:
+        if p['id'] in done or k in seen or p.get('copy'):
             continue
         seen.add(k)
         todo.append(p)
