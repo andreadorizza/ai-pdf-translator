@@ -36,7 +36,7 @@ Then run `ai-pdf-translator status W`. Start a subagent again for any batch it l
 
 ## 5. Scan check
 
-Run `ai-pdf-translator crops W`. For each scan-check file it prints, start a subagent with a model that reads images (in Claude Code: the `pdf-scan-checker` agent, or `model: sonnet`):
+Run `ai-pdf-translator crops W`: it crops the page as printed for every paragraph in doubt, on scans and on digital pages (a text layer can lack figures the page shows). For each scan-check file it prints, start a subagent with a model that reads images (in Claude Code: the `pdf-scan-checker` agent, or `model: sonnet`):
 
 > Work folder: W. Follow W/SCANCHECK.md for W/scancheck/NNN.json; open each image with your file-reading tool. Write only the file named in its "output" field. Reply with one line: items changed and items unreadable.
 

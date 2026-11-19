@@ -66,9 +66,52 @@ def _receive_layout_with_page(self, ltpage):
     return _receive_layout(self, ltpage)
 
 
+def _merged_words(page, prof):
+    """Words of a text page. PDFs from word processors tag runs with ActualText: PyMuPDF uses it, which gives
+    correct Lao but can drop figures, brackets and Latin words the page shows. Add those back from the raw glyphs."""
+    words = page.get_text('words')
+    covered = [Rect(w[:4]) for w in words]
+    raw = page.get_text('rawdict', flags=pymupdf.TEXTFLAGS_RAWDICT | pymupdf.TEXT_IGNORE_ACTUALTEXT)
+    extra = []
+    for b in raw['blocks']:
+        for l in b.get('lines', []):
+            for s in l['spans']:
+                run, box = '', None
+                for c in s['chars'] + [None]:
+                    keep = False
+                    if c is not None and c['c'].strip() and not (prof and prof.in_script(c['c'])):
+                        r = Rect(c['bbox'])
+                        centre = (r.tl + r.br) / 2
+                        keep = not any(centre in w for w in covered)
+                    if keep:
+                        run += c['c']
+                        box = Rect(c['bbox']) if box is None else box | Rect(c['bbox'])
+                    elif run:
+                        near = min(words, key=lambda w: abs((w[1] + w[3]) / 2 - (box.y0 + box.y1) / 2), default=None)
+                        extra.append((*box, run, near[5] if near else -1, near[6] if near else -1, -1))
+                        run, box = '', None
+    return words + extra
+
+
+class _PageWithFigures:
+    """A page whose words include what ActualText hides (see _merged_words); everything else is the page."""
+
+    def __init__(self, page, prof):
+        self._page, self._prof = page, prof
+
+    def __getattr__(self, name):
+        return getattr(self._page, name)
+
+    def get_text(self, kind='text', *args, **kwargs):
+        if kind == 'words' and not args and not kwargs:
+            return _merged_words(self._page, self._prof)
+        return self._page.get_text(kind, *args, **kwargs)
+
+
 def _ocr_page(page, detection, translator, font, thread, cancellation_event=None):
     pno = page.number + 1
-    paras = zocr.ocr_paragraphs(page, detection)
+    source = page if pno in STATE['scan_pages'] else _PageWithFigures(page, STATE['profile'])
+    paras = zocr.ocr_paragraphs(source, detection)
     if not paras:
         return
     if STATE['mode'] == 'record':

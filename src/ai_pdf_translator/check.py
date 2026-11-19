@@ -36,9 +36,20 @@ def to_check(paragraphs, english, checks):
     return out
 
 
+def page_image(work, page):
+    """The page at 300 DPI: the OCR render for scan pages, rendered now for text pages."""
+    png = Path(work) / 'ocr' / f'p{page:03d}.png'
+    if not png.exists():
+        import pymupdf
+        png.parent.mkdir(exist_ok=True)
+        source = json.loads((Path(work) / 'job.json').read_text())['source']
+        pymupdf.open(source)[page - 1].get_pixmap(dpi=DPI).save(png)
+    return Image.open(png)
+
+
 def crop(work, p, paragraphs):
     """The paragraph with the whole text column and about one line above and below, zoomed when small."""
-    im = Image.open(Path(work) / 'ocr' / f"p{p['page']:03d}.png")
+    im = page_image(work, p['page'])
     s = DPI / 72
     same = [o['bbox'] for o in paragraphs if o['page'] == p['page'] and o.get('bbox')]
     left, right = min(b[0] for b in same), max(b[2] for b in same)
@@ -58,7 +69,8 @@ def make_scan_checks(work, paragraphs):
     english, checks = load_translations(work)
     todo = to_check(paragraphs, english, checks)
     by_id = {p['id']: p for p in paragraphs}
-    scan = [i for i in todo if by_id.get(i, {}).get('kind') == 'scan']
+    # Text pages too: a text layer can lack what the page shows (figures drawn without text behind them).
+    scan = [i for i in todo if by_id.get(i, {}).get('bbox')]
     (work / 'scancheck').mkdir(exist_ok=True)
     files = []
     for n, i in enumerate(range(0, len(scan), GROUP), 1):
