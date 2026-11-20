@@ -16,9 +16,11 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "laonlp" },
+    { name = "opencv-python-headless" },
     { name = "pdf2zh" },
     { name = "pillow" },
     { name = "pymupdf" },
+    { name = "rapidocr-onnxruntime" },
     { name = "requests" },
     { name = "sacrebleu" },
     { name = "wordninja" },
@@ -27,9 +29,11 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "laonlp" },
+    { name = "opencv-python-headless" },
     { name = "pdf2zh", git = "https://github.com/PDFMathTranslate/PDFMathTranslate?rev=86912e262d47361deceed97f0355ec6e3459b945" },
     { name = "pillow" },
     { name = "pymupdf" },
+    { name = "rapidocr-onnxruntime" },
     { name = "requests" },
     { name = "sacrebleu" },
     { name = "wordninja" },
