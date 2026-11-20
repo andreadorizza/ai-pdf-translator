@@ -84,10 +84,13 @@ def build(work, prof, threads=4, review_only=False):
         elif checked.get(pid, {}).get('note') and pid not in unreadable and (
                 not checked[pid].get('changed') or DOUBT.search(checked[pid]['note'])):
             review.append((p, 'Note from the scan check', checked[pid]['note']))
+    unsure = {}                     # unsure labels in pictures: one item per page, each label with its English
     for x in picture_labels:
         if x['unsure']:
-            review.append(({'id': 'picture', 'page': x['page'], 'text': x['source']},
-                           'A label in a picture the reader was unsure of', ''))
+            unsure.setdefault(x['page'], []).append(f"{x['source']} → {x['english']}")
+    for page, items in sorted(unsure.items()):
+        review.append(({'id': 'pictures', 'page': page, 'text': f'{len(items)} labels'},
+                       'Labels in pictures the reader was unsure of', '; '.join(items)))
     for page, text in missing_in_layout:
         review.append(({'id': '?', 'page': page, 'text': text}, 'Found in the layout but not in the paragraph list', ''))
 

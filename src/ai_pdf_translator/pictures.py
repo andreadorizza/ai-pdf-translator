@@ -27,6 +27,8 @@ def pictures_on(doc, pno, min_side=150):
     out = []
     for info in page.get_images(full=True):
         xref = info[0]
+        if info[1]:     # a transparency mask: a layer of a composed page (a cover, a logo); inpainting it smears
+            continue
         rects = page.get_image_rects(xref)
         if not rects:
             continue
@@ -305,13 +307,13 @@ def apply(work, in_pdf, out_pdf):
     for key, entry in index.items():
         page = doc[entry['page'] - 1]
         want = pymupdf.Rect(entry['rect'])
-        xref = None
+        xref = smask = None
         for info in page.get_images(full=True):
             rects = page.get_image_rects(info[0])
             if rects and abs(rects[0].x0 - want.x0) < 1 and abs(rects[0].y0 - want.y0) < 1:
-                xref = info[0]
+                xref, smask = info[0], info[1]
                 break
-        if xref is None:
+        if xref is None or smask:
             continue
         img = Image.open(io.BytesIO(doc.extract_image(xref)['image'])).convert('RGB')
         if list(img.size) != entry['size']:
@@ -322,7 +324,12 @@ def apply(work, in_pdf, out_pdf):
             res[str(j)] = {'erase': True}
         out = redraw(img, entry['labels'] + entry['erase'], res, fp)
         buf = io.BytesIO()
-        out.save(buf, 'JPEG', quality=90)
+        if smask:                   # a picture with transparency keeps it (a cover's cut-out map)
+            alpha = Image.open(io.BytesIO(doc.extract_image(smask)['image'])).convert('L').resize(out.size)
+            out.putalpha(alpha)
+            out.save(buf, 'PNG')
+        else:
+            out.save(buf, 'JPEG', quality=90)
         page.replace_image(xref, stream=buf.getvalue())
         for i in range(1, n + 1):
             r = results.get(key, {}).get(str(i)) or {}
