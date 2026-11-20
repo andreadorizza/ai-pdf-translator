@@ -110,11 +110,40 @@ def _roman(s):
     return total
 
 
+UNITS = {'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
+         'ten': 10, 'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15, 'sixteen': 16,
+         'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
+         'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90}
+SCALES = {'hundred': 100, 'thousand': 1000, 'million': 1000000, 'billion': 1000000000}
+
+
+def _word_numbers(low):
+    """Numbers written in words, compound ones included: "one hundred and eighty" is 180."""
+    out, total, current, seen = [], 0, 0, False
+    for tok in re.findall(r"[a-z]+", low.replace('-', ' ')) + ['.']:
+        if tok in UNITS:
+            current += UNITS[tok]
+            seen = True
+        elif tok in SCALES and seen:
+            if SCALES[tok] == 100:
+                current *= 100
+            else:
+                total += current * SCALES[tok]
+                current = 0
+        elif tok == 'and' and seen:
+            continue
+        else:
+            if seen:
+                out.append(total + current)
+            total, current, seen = 0, 0, False
+    return out
+
+
 def _english_numbers(english):
     """Every number the English states: digits, number words, ordinals, Roman numerals, months."""
     en = english.replace(',', '')
     low = en.lower()
-    have = set(_runs(en))
+    have = set(_runs(en)) | {str(n) for n in _word_numbers(low)}
     have |= {str(v) for w, v in WORDS.items() if re.search(rf'\b{w}\b', low)}
     have |= {str(i + 1) for i, w in enumerate(ORDINALS) if re.search(rf'\b{w}\b', low)}
     have |= {str(_roman(r)) for r in re.findall(r'\b([IVXLC]{1,6})\b', en)}

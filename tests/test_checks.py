@@ -9,8 +9,8 @@ LO = langs.load('lo')
 def test_numbers_found_as_digits_words_and_months():
     src = 'ສະບັບເລກທີ 292/ລບ, ລົງວັນທີ 28/05/2025 ພາຍໃນ 180 ວັນ ແລະ 15 ວັນ'
     en = 'Decree No. 292/GO, dated 28 May 2025, within one hundred and eighty days and fifteen days'
-    assert number_problems(src, en, LO) == ['180']          # "one hundred and eighty" is not matched; a person checks
-    assert number_problems(src, en.replace('one hundred and eighty', '180'), LO) == []
+    assert number_problems(src, en, LO) == []               # "one hundred and eighty" is 180
+    assert number_problems(src, en.replace('one hundred and eighty', 'one hundred'), LO) == ['180']
 
 
 def test_lao_digits_and_missing_figure():
@@ -53,3 +53,9 @@ def test_ordinals_roman_sections_and_split_figures():
 def test_figures_the_pdf_prints_twice():
     assert number_problems('ກວມເອົາ 16 16, 2% 2% ແລະ 20302030', 'accounted for 16.2% and 2030', LO) == []
     assert number_problems('ປີ 2020', 'in 2020', LO) == []
+
+
+def test_compound_number_words():
+    from ai_pdf_translator.check import _word_numbers
+    assert _word_numbers('twenty-five days and two thousand five hundred tonnes') == [25, 2500]
+    assert _word_numbers('one hundred and eighty') == [180]
