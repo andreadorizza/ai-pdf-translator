@@ -22,6 +22,8 @@ On a scanned Lao decree with an English version (the 60 articles all outputs sha
 
 Details are in [eval/](eval/). Only Lao is tested. Other languages work through a language profile and are experimental until they pass a self-test.
 
+A step-by-step guide is on [dorizza.com/resources/ai-pdf-translator](https://dorizza.com/resources/ai-pdf-translator/).
+
 ## Install
 
 In Claude Code:
