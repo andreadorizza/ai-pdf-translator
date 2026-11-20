@@ -107,6 +107,25 @@ def translate_batches(work, svc, workers=4):
             print(f'  batch {batch}: {got}/{n} paragraphs', flush=True)
 
 
+def pictures(work, svc, workers=4):
+    """Read the contact sheets of every picture task (headless mode)."""
+    work = Path(work)
+    system = _read(work, 'PICTURES.md') + '\nThe contact sheets are attached in the order listed. Return only the JSON object.'
+    todo = [f for f in sorted((work / 'pictures').glob('[0-9][0-9][0-9].json'))
+            if not (work / json.loads(f.read_text())['output']).exists()]
+
+    def one(f):
+        task = json.loads(f.read_text())
+        listing = json.dumps([{'picture': s['picture'], 'sheet': i + 1} for i, s in enumerate(task['sheets'])])
+        res = svc.ask(system, 'Sheets, in order: ' + listing, [work / s['file'] for s in task['sheets']])
+        (work / task['output']).write_text(json.dumps(res, ensure_ascii=False, indent=1))
+        return task['task'], sum(len(v) for v in res.values())
+
+    with ThreadPoolExecutor(workers) as ex:
+        for name, n in ex.map(one, todo):
+            print(f'  pictures {name}: {n} labels', flush=True)
+
+
 def scan_check(work, svc, files, workers=4):
     work = Path(work)
     system = _read(work, 'SCANCHECK.md') + '\nThe crops are attached in the order of the items. Return only the JSON object.'

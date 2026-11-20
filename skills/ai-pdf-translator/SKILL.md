@@ -30,7 +30,15 @@ Start one subagent per file in W/batches/ (names `001.json`, `002.json`, …), s
 
 > Translate W/batches/NNN.json: follow the instructions inside it. Write only the file named in its "output" field (relative to W). Reply with one line: paragraphs translated and items in "check".
 
-Each batch file holds everything the subagent needs, so it reads one file and writes one. Do not split batches smaller: every subagent has a fixed cost. A batch file with a `pictures` field holds text read from pictures (map legends, charts): give it a subagent whose model reads images (in Claude Code: `model: sonnet`), so it can read the pictures and fix the OCR.
+Each batch file holds everything the subagent needs, so it reads one file and writes one. Do not split batches smaller: every subagent has a fixed cost.
+
+## 4b. Text in pictures
+
+For each task file in W/pictures/ (`001.json`, …), start a subagent with a model that reads images (in Claude Code: the `pdf-scan-checker` agent, or `model: sonnet`), at the same time as the batches:
+
+> Work folder: W. Follow W/PICTURES.md for W/pictures/NNN.json; open each contact sheet it lists with your file-reading tool. Write only the file named in its "output" field. Reply with one line: labels read and labels unsure.
+
+`build` then erases those labels from the pictures and draws the English in their place.
 
 Then run `ai-pdf-translator status W`. Start a subagent again for any batch it lists as left.
 

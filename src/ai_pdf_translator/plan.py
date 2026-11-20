@@ -96,9 +96,9 @@ def write_files(work, paragraphs, prof, batch_chars=BATCH_CHARS):
     work = Path(work)
     for d in ('batches', 'translations', 'terms'):
         (work / d).mkdir(exist_ok=True)
-    for name in ('TRANSLATOR.md', 'TERMS.md', 'SCANCHECK.md'):
+    for name in ('TRANSLATOR.md', 'TERMS.md', 'SCANCHECK.md', 'PICTURES.md'):
         text = resources.files('ai_pdf_translator.prompts').joinpath(name).read_text()
-        (work / name).write_text(text.replace('{language}', prof.name))
+        (work / name).write_text(text.replace('{language}', prof.name).replace('{notes}', prof.get('picture_notes', '')))
     cands = term_candidates(paragraphs, prof)
     (work / 'terms' / 'candidates.json').write_text(json.dumps(
         {'language': prof.name, 'instructions': 'TERMS.md', 'output': 'terms/terms.json', **cands},
@@ -146,9 +146,5 @@ def write_batches(work, paragraphs, prof, batch_chars=BATCH_CHARS):
             items.append(dict(item, **hints(p)))
         b = {'batch': name, 'output': f'translations/{name}.json', 'instructions': instructions,
              'terms': used if terms else 'no term list yet', 'paragraphs': items}
-        pages = sorted({p['page'] for p in g if p.get('role') == 'picture'})
-        if pages:       # the pictures themselves, so the translator can read what OCR misread
-            b['pictures'] = {str(n): [str(f.relative_to(work)) for f in sorted((work / 'ocr').glob(f'p{n:03d}.pic*.png'))]
-                             for n in pages}
         (work / 'batches' / f'{name}.json').write_text(json.dumps(b, ensure_ascii=False, indent=1))
     return groups

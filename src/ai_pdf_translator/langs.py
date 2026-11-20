@@ -31,6 +31,11 @@ PROFILES = {
         # Tone marks and vowels stack above and below the line, outside the word boxes OCR reports.
         'stacked_marks': True,
         'combining_marks': '\u0eb1\u0eb4-\u0ebc\u0ec8-\u0ecd',
+        # Conventions for reading labels in pictures (maps above all)
+        'picture_notes': ('On Lao maps, ມ. is a district (ເມືອງ): write "Name District"; ຂ. is a province (ແຂວງ): '
+                          '"Name Province". Countries: ຈີນ China, ໄທ Thailand, ຫວຽດນາມ Vietnam, ມຽນມາ Myanmar, '
+                          'ກຳປູເຈຍ Cambodia. Use the usual English spellings of Lao places (Phongsaly, Luang Prabang, '
+                          'Savannakhet, Champasak, Vientiane).'),
     },
 }
 

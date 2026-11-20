@@ -55,7 +55,12 @@ def build(work, prof, threads=4, review_only=False):
     lookup = {(p['page'], key(p['text'])): english[p['id']] for p in paragraphs if p['id'] in english}
     stem = Path(job['source']).stem
     mono, dual = work / f'{stem}.en.pdf', work / f'{stem}.bilingual.pdf'
-    missing_in_layout = [] if review_only else layout.render(job['searchable'], job['pages'], job['scan_pages'], prof,
+    source, picture_labels = job['searchable'], []
+    if (work / 'pictures' / 'index.json').exists():     # text in pictures: redrawn in a copy before the layout pass
+        from . import pictures
+        source = work / 'source.pictures.pdf'
+        picture_labels = pictures.apply(work, job['searchable'], source)
+    missing_in_layout = [] if review_only else layout.render(source, job['pages'], job['scan_pages'], prof,
                                                              work, lookup, mono, dual, threads)
 
     review = []
@@ -79,6 +84,10 @@ def build(work, prof, threads=4, review_only=False):
         elif checked.get(pid, {}).get('note') and pid not in unreadable and (
                 not checked[pid].get('changed') or DOUBT.search(checked[pid]['note'])):
             review.append((p, 'Note from the scan check', checked[pid]['note']))
+    for x in picture_labels:
+        if x['unsure']:
+            review.append(({'id': 'picture', 'page': x['page'], 'text': x['source']},
+                           'A label in a picture the reader was unsure of', ''))
     for page, text in missing_in_layout:
         review.append(({'id': '?', 'page': page, 'text': text}, 'Found in the layout but not in the paragraph list', ''))
 
@@ -101,7 +110,7 @@ def build(work, prof, threads=4, review_only=False):
         lines.append('')
     (work / 'review.md').write_text('\n'.join(lines))
 
-    write_markdown(work, stem, paragraphs, english, prof)
+    write_markdown(work, stem, paragraphs, english, prof, picture_labels)
     return {'pdf': str(mono), 'bilingual': str(dual), 'markdown': str(work / f'{stem}.en.md'),
             'source_markdown': str(work / f'{stem}.{prof.code}.md'),
             'bilingual_markdown': str(work / f'{stem}.bilingual.md'),
@@ -119,11 +128,20 @@ def _table(rows):
     return '\n'.join(lines)
 
 
-def _blocks(paragraphs, text_of):
-    """Page by page: paragraphs and labels as text, the cells of each table as one Markdown table."""
+def _blocks(paragraphs, text_of, pictures=None):
+    """Page by page: paragraphs and labels as text, the cells of each table as one Markdown table, then the labels
+    read from the page's pictures."""
     out, page, tables = [], None, {}
+    pictures = pictures or {}
+
+    def picture_block(n):
+        if pictures.get(n):
+            out.append('Labels in pictures: ' + ' · '.join(pictures[n]))
+
     for p in paragraphs:
         if p['page'] != page:
+            if page is not None:
+                picture_block(page)
             page = p['page']
             out.append(f'*Page {page}*')
         t = text_of(p)
@@ -137,16 +155,22 @@ def _blocks(paragraphs, text_of):
             tables[key][(p['row'], p['col'])] = t
         else:
             out.append(t)
+    if page is not None:
+        picture_block(page)
     return '\n\n'.join(_table(b) if isinstance(b, dict) else b for b in out) + '\n'
 
 
-def write_markdown(work, stem, paragraphs, english, prof):
+def write_markdown(work, stem, paragraphs, english, prof, picture_labels=()):
     """The source text, the English, and both together, in reading order with page marks. No model involved."""
     work = Path(work)
     src = lambda p: prof.norm(p['text']).strip()
     en = lambda p: english.get(p['id'], '').strip()
-    (work / f'{stem}.{prof.code}.md').write_text(_blocks(paragraphs, src))
-    (work / f'{stem}.en.md').write_text(_blocks(paragraphs, en))
+    by_page_src, by_page_en = {}, {}
+    for x in picture_labels:
+        by_page_src.setdefault(x['page'], []).append(x['source'])
+        by_page_en.setdefault(x['page'], []).append(x['english'])
+    (work / f'{stem}.{prof.code}.md').write_text(_blocks(paragraphs, src, by_page_src))
+    (work / f'{stem}.en.md').write_text(_blocks(paragraphs, en, by_page_en))
     both = []
     page = None
     for p in paragraphs:
@@ -155,4 +179,7 @@ def write_markdown(work, stem, paragraphs, english, prof):
             both.append(f'## Page {page}')
         role = '' if p.get('role', 'paragraph') == 'paragraph' else f" ({p['role']})"
         both.append(f"> {src(p)}{role}\n\n{en(p) or '*(not translated)*'}")
+        nxt = paragraphs[paragraphs.index(p) + 1]['page'] if p is not paragraphs[-1] else None
+        if nxt != page:
+            both += [f"> {x['source']} (picture)\n\n{x['english']}" for x in picture_labels if x['page'] == page]
     (work / f'{stem}.bilingual.md').write_text('\n\n'.join(both) + '\n')

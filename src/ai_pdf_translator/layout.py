@@ -169,14 +169,6 @@ def _bbox(words):
     return r
 
 
-def _picture_words(pno):
-    import json
-    f = Path(STATE['work']) / 'ocr' / f'p{pno:03d}.pictures.json'
-    if not f.exists():
-        return []
-    return [tuple(w) for w in json.loads(f.read_text()) if str(w[4]).strip() and w[5] >= 20]
-
-
 def _clusters(words, stack=True):
     """Words split into chunks at wide gaps on a line, then (with stack) chunks stacked in one column joined."""
     chunks = []
@@ -259,23 +251,6 @@ def _labels(page, source, paras, is_scan):
     for cl in _clusters(words):
         add(cl, 'label')
 
-    # Text inside pictures (digital pages): read by OCR in prepare, covered in the picture's own colour, and
-    # replaced by the English. Text lying under text we translate anyway (a cover title's shadow) is left alone.
-    pics = [] if is_scan else _picture_words(page.number + 1)
-    if pics:
-        taken = [Rect(b) for b, *_ in paras] + [x['bbox'] for x in items]
-        for cl in _clusters(pics, stack=False):      # a legend or chart label is one line
-            box = _bbox(cl)
-            text = _join(cl)
-            letters = sum(c.isalpha() for c in text)
-            if prof is None or prof.count(text) < 3 or prof.count(text) < 0.5 * letters:
-                continue                            # texture or noise read as letters
-            if any((box & t).get_area() > 0.3 * box.get_area() for t in taken):
-                continue                            # under text we translate anyway (a cover title's shadow)
-            n = len(items)
-            add(cl, 'picture')
-            if len(items) > n:
-                items[-1]['conf'] = round(sum(w[5] for w in cl) / len(cl), 1)
     return items
 
 

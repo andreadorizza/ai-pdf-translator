@@ -4,7 +4,7 @@ AI PDF translator for scanned and digital documents in Lao and other low-resourc
 
 - **Checked OCR.** Scanned pages are read twice by two Tesseract models. Where they disagree, or a figure or an unknown word appears, the paragraph is marked as a doubt. A model then compares only those paragraphs with a crop of the scan.
 - **Token-efficient translation.** The command does everything that needs no model. Your agent's subagents translate the document in batches of whole sections, on a small model, with one shared term list. A 100-page document never passes through the main agent's context.
-- **The original layout.** The English is set into each paragraph's place on the page, and into table cells, figure labels, covers and running headers on digital pages. Layout detection comes from [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate). Images, stamps and signatures stay. You also get a bilingual PDF, and the text as Markdown: the source, the English, and both together.
+- **The original layout.** The English is set into each paragraph's place on the page, and into table cells, figure labels, covers and running headers on digital pages. Text inside pictures (maps, charts) is found by a text detector, read by a vision subagent from zoomed contact sheets, erased from the picture's pixels and redrawn in English, the way Google Lens does it. Layout detection comes from [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate). Images, stamps and signatures stay. You also get a bilingual PDF, and the text as Markdown: the source, the English, and both together.
 - **A review list.** It lists paragraphs the scan check could not read, figures in the source that the English lacks, and translator doubts nobody checked. You correct them with `apply`, with no further model runs.
 
 ## Results
@@ -64,7 +64,7 @@ Without an agent, with an API key: `ai-pdf-translator translate report.translati
 
 ## Status
 
-Version 0.1. Tested: scanned and digital Lao PDFs, agent mode in Claude Code. Not yet translated: text inside raster images (maps, chart pictures) and tables on scanned pages beyond their text. Not yet tested: headless mode, Codex, OpenCode, rotated pages, languages other than Lao. See the issues.
+Version 0.1. Tested: scanned and digital Lao PDFs, agent mode in Claude Code. Text in pictures: small labels on dense maps can still be missed. Not yet tested: headless mode, Codex, OpenCode, rotated pages, languages other than Lao. See the issues.
 
 ## Licence and credits
 

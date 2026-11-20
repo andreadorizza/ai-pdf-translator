@@ -59,10 +59,6 @@ def prepare(pdf, lang='lo', pages=None, work=None, psm=4, threads=4, batch_chars
     todo = [p for p in pages if kinds[p - 1] in ('text', 'scan')]
     if not todo:
         raise SystemExit('No page to translate: every page is blank or already in English.')
-    text_pages = [p for p in todo if kinds[p - 1] == 'text']
-    n = ocr.read_pictures(src, text_pages, prof, work, workers=threads)
-    if n:
-        print(f'Read the text inside {n} pictures on text pages', flush=True)
     searchable = work / 'source.searchable.pdf'
     ocr.searchable_pdf(src, scan, work, searchable)
     print('Finding paragraphs (PDFMathTranslate layout model)', flush=True)
@@ -72,6 +68,9 @@ def prepare(pdf, lang='lo', pages=None, work=None, psm=4, threads=4, batch_chars
         p['doubts'] = doubts.find(p, prof, work)
     (work / 'paragraphs.json').write_text(json.dumps(paragraphs, ensure_ascii=False, indent=1))
     groups, cands = plan.write_files(work, paragraphs, prof, batch_chars or plan.BATCH_CHARS)
+    from . import pictures
+    print('Finding the text inside pictures', flush=True)
+    n_pics, n_labels, n_tasks = pictures.prepare(src, [p for p in todo if kinds[p - 1] == 'text'], prof, work, paragraphs)
     job = {'source': str(src), 'lang': lang, 'pages': todo, 'scan_pages': scan, 'searchable': str(searchable),
            'kinds': {k: [p for p in pages if kinds[p - 1] == k] for k in ('text', 'scan', 'target', 'blank')},
            'batch_chars': batch_chars or plan.BATCH_CHARS, 'started': started, 'prepared_at': datetime.now(timezone.utc).isoformat(timespec='seconds')}
@@ -83,6 +82,7 @@ def prepare(pdf, lang='lo', pages=None, work=None, psm=4, threads=4, batch_chars
           f'Pages: {len(k["scan"])} scan, {len(k["text"])} text, {len(k["target"])} already English, {len(k["blank"])} blank\n'
           f'Paragraphs: {len(paragraphs)} ({chars:,} {prof.name} characters), {doubtful} with doubts\n'
           f'Batches: {len(groups)} (batches/001.json … {len(groups):03d}.json); term candidates: {len(cands["phrases"])}\n'
+          f'Pictures: {n_pics} with {n_labels} labels to read, in {n_tasks} tasks (pictures/001.json …; PICTURES.md)\n'
           f'Next: term list (TERMS.md → terms/terms.json), then "ai-pdf-translator batches {work}", '
           f'then one translator per batch.')
     return work
@@ -137,10 +137,13 @@ def status(work):
     left = [b.name for b in batches if not (work / json.loads(b.read_text())['output']).exists()]
     checks = sorted((work / 'scancheck').glob('[0-9][0-9][0-9].json')) if (work / 'scancheck').exists() else []
     left_checks = [c.name for c in checks if not (work / json.loads(c.read_text())['output']).exists()]
+    pics = sorted((work / 'pictures').glob('[0-9][0-9][0-9].json')) if (work / 'pictures').exists() else []
+    left_pics = [p.name for p in pics if not (work / 'pictures' / f'{p.stem}.result.json').exists()]
     job = json.loads((work / 'job.json').read_text())
     built = (work / f"{Path(job['source']).stem}.en.pdf").exists()
     print(f"Term list: {'done' if (work / 'terms' / 'terms.json').exists() else 'missing (TERMS.md)'}\n"
           f"Batches translated: {len(batches) - len(left)}/{len(batches)}" + (f" (left: {', '.join(left)})" if left else '') + '\n'
+          f"Picture tasks done: {len(pics) - len(left_pics)}/{len(pics)}" + (f" (left: {', '.join(left_pics)})" if left_pics else '') + '\n'
           f"Scan checks done: {len(checks) - len(left_checks)}/{len(checks)}" + (f" (left: {', '.join(left_checks)})" if left_checks else '') + '\n'
           f"Built: {'yes' if built else 'no'}")
 
@@ -207,6 +210,9 @@ def translate(work, service, model, check_model=None, base_url=None, threads=4):
     rebatch(work)
     print(f'Translating batches ({model})', flush=True)
     services.translate_batches(work, svc, threads)
+    if (work / 'pictures').exists():
+        print(f'Reading text in pictures ({chk.model})', flush=True)
+        services.pictures(work, chk, threads)
     files = crops(work)
     if files:
         print(f'Scan check ({chk.model})', flush=True)
